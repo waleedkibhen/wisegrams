@@ -1,33 +1,42 @@
-import { Redis } from "@upstash/redis";
+import { initializeApp, getApps, getApp } from "firebase/app";
+import { getFirestore, doc, getDoc, setDoc } from "firebase/firestore";
 import type { VideoPost } from "./storage";
 
-// Global fallback for local development before Vercel Redis is configured
-const globalForDb = global as unknown as { localVideos: VideoPost[] };
-if (!globalForDb.localVideos) {
-  globalForDb.localVideos = [];
-}
+// Your web app's Firebase configuration
+const firebaseConfig = {
+  apiKey: "AIzaSyDZxhiKuoaHT-4CtmMGeR6we00hsqwXzJ0",
+  authDomain: "wisegrams-d51ad.firebaseapp.com",
+  projectId: "wisegrams-d51ad",
+  storageBucket: "wisegrams-d51ad.firebasestorage.app",
+  messagingSenderId: "105715449465",
+  appId: "1:105715449465:web:9089cccbbffbcc05ef5ea8",
+  measurementId: "G-3SC4SBBQQ3"
+};
 
-const redis = process.env.UPSTASH_REDIS_REST_URL
-  ? new Redis({
-      url: process.env.UPSTASH_REDIS_REST_URL,
-      token: process.env.UPSTASH_REDIS_REST_TOKEN || "",
-    })
-  : null;
+// Initialize Firebase securely (avoiding hot-reload re-initialization errors)
+const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+const db = getFirestore(app);
 
-const REDIS_KEY = "wisegrams:videos";
+// We store the entire feed as an array in a single document to massively save on Firebase quotas (1 read = full feed).
+const FEED_DOC_REF = doc(db, "feed", "global");
 
 export async function getVideosDb(): Promise<VideoPost[]> {
-  if (redis) {
-    const data = await redis.get<VideoPost[]>(REDIS_KEY);
-    return data || [];
+  try {
+    const snap = await getDoc(FEED_DOC_REF);
+    if (snap.exists()) {
+      return (snap.data().videos as VideoPost[]) || [];
+    }
+    return [];
+  } catch (error) {
+    console.error("Firebase read error:", error);
+    return [];
   }
-  return globalForDb.localVideos;
 }
 
 export async function saveVideosDb(videos: VideoPost[]): Promise<void> {
-  if (redis) {
-    await redis.set(REDIS_KEY, videos);
-  } else {
-    globalForDb.localVideos = videos;
+  try {
+    await setDoc(FEED_DOC_REF, { videos });
+  } catch (error) {
+    console.error("Firebase write error:", error);
   }
 }
