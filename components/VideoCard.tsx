@@ -58,8 +58,10 @@ export default function VideoCard({
   const [showMuteToast, setShowMuteToast] = useState(false);
 
   const isActive = index === activeIndex;
-  // Only keep this card's media pipeline alive if it's active or immediately next
+  // For iframes, we only render them when active or 1 away to save memory.
   const shouldHaveSrc = isActive || index === activeIndex + LOOKAHEAD;
+  
+  const isIframe = video.streamUrl.includes("drive.google.com");
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -207,21 +209,34 @@ export default function VideoCard({
   return (
     <div
       className="relative w-full h-full overflow-hidden bg-black select-none"
-      onClick={handleTap}
     >
-      {/* ── The single video element — always in DOM, src is managed imperatively ── */}
-      <video
-        ref={videoRef}
-        className="absolute inset-0 w-full h-full object-contain bg-black"
-        loop
-        muted
-        playsInline
-        onCanPlay={onCanPlay}
-        onPlay={onPlay}
-        onPause={onPause}
-        onTimeUpdate={onTimeUpdate}
-        onError={onError}
-      />
+      {/* ── Background color and tap target for non-iframe areas ── */}
+      <div className="absolute inset-0 z-0" onClick={handleTap} />
+
+      {/* ── Media element (Video or Iframe) ── */}
+      {isIframe ? (
+        shouldHaveSrc && (
+          <iframe
+            src={video.streamUrl}
+            className="absolute inset-0 w-full h-full object-contain bg-black z-10 border-none pointer-events-auto"
+            allow="autoplay"
+            sandbox="allow-scripts allow-same-origin allow-presentation"
+          />
+        )
+      ) : (
+        <video
+          ref={videoRef}
+          className="absolute inset-0 w-full h-full object-contain bg-black z-10 pointer-events-none"
+          loop
+          muted
+          playsInline
+          onCanPlay={onCanPlay}
+          onPlay={onPlay}
+          onPause={onPause}
+          onTimeUpdate={onTimeUpdate}
+          onError={onError}
+        />
+      )}
 
       {/* Loading spinner */}
       {isActive && !isLoaded && !hasError && (
@@ -303,12 +318,14 @@ export default function VideoCard({
           <span className="text-white text-[12px] font-semibold drop-shadow">Share</span>
         </button>
 
-        {/* Mute */}
-        <button onClick={handleMuteToggle} className="mt-1">
-          {isMuted
-            ? <VolumeX size={26} color="white" strokeWidth={2} className="drop-shadow-lg" />
-            : <Volume2 size={26} color="white" strokeWidth={2} className="drop-shadow-lg" />}
-        </button>
+        {/* Mute (hidden for iframes since we can't control their volume) */}
+        {!isIframe && (
+          <button onClick={handleMuteToggle} className="mt-1 z-30">
+            {isMuted
+              ? <VolumeX size={26} color="white" strokeWidth={2} className="drop-shadow-lg" />
+              : <Volume2 size={26} color="white" strokeWidth={2} className="drop-shadow-lg" />}
+          </button>
+        )}
 
         {/* Spinning disc */}
         <div
@@ -359,13 +376,15 @@ export default function VideoCard({
         </div>
       </div>
 
-      {/* Progress bar */}
-      <div
-        className="absolute left-0 right-0 h-[2px] bg-white/15 z-30 pointer-events-none"
-        style={{ bottom: `${NAV_H}px` }}
-      >
-        <div className="h-full bg-white" style={{ width: `${progress * 100}%`, transition: "none" }} />
-      </div>
+      {/* Progress bar (hidden for iframes since we can't track progress) */}
+      {!isIframe && (
+        <div
+          className="absolute left-0 right-0 h-[2px] bg-white/15 z-30 pointer-events-none"
+          style={{ bottom: `${NAV_H}px` }}
+        >
+          <div className="h-full bg-white" style={{ width: `${progress * 100}%`, transition: "none" }} />
+        </div>
+      )}
     </div>
   );
 }

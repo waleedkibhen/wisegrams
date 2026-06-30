@@ -9,7 +9,7 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import type { VideoPost, UserProfile } from "@/lib/storage";
-import { getDriveApiUrl, getDriveThumbnailUrl } from "@/lib/driveUtils";
+import { getDrivePreviewUrl, getDriveThumbnailUrl } from "@/lib/driveUtils";
 
 // ─── Store Types ───────────────────────────────────────────────────────────────
 
@@ -51,11 +51,11 @@ export const useVideoStore = create<VideoStore>()(
           const res = await fetch("/api/videos");
           if (res.ok) {
             const data = await res.json();
-            // Dynamically upgrade any old proxy URLs to the new native API URL
+            // Dynamically upgrade any old URLs to the new native Preview URL
             // on the fly so we don't have to rewrite the database.
             const upgradedVideos = data.videos.map((v: VideoPost) => {
-              if (v.streamUrl.includes("/api/proxy") && v.driveShareUrl) {
-                return { ...v, streamUrl: getDriveApiUrl(v.driveShareUrl) ?? v.streamUrl };
+              if ((v.streamUrl.includes("/api/proxy") || v.streamUrl.includes("googleapis.com")) && v.driveShareUrl) {
+                return { ...v, streamUrl: getDrivePreviewUrl(v.driveShareUrl) ?? v.streamUrl };
               }
               return v;
             });
@@ -68,7 +68,7 @@ export const useVideoStore = create<VideoStore>()(
       },
 
       addVideo: async (shareUrl, caption) => {
-        const streamUrl = getDriveApiUrl(shareUrl);
+        const streamUrl = getDrivePreviewUrl(shareUrl);
         const thumbnailUrl = getDriveThumbnailUrl(shareUrl);
         if (!streamUrl) return;
 
