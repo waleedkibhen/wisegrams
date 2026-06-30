@@ -103,7 +103,7 @@ export default function VideoCard({
       if (loadedSrcRef.current !== "") {
         loadedSrcRef.current = "";
         el.pause();
-        el.src = "";
+        el.removeAttribute("src");
         el.load();
       }
     }
