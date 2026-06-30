@@ -16,6 +16,13 @@ import {
 } from "lucide-react";
 import type { VideoPost } from "@/lib/storage";
 
+// Height of the solid header bar — must match FeedHeader
+const HEADER_H = 56;
+// Height of the solid bottom nav — must match BottomNav
+const NAV_H = 64;
+// Extra breathing room above the nav for bottom-left text / sidebar buttons
+const CONTENT_BOTTOM = NAV_H + 12;
+
 interface VideoCardProps {
   video: VideoPost;
   index: number;
@@ -30,7 +37,6 @@ export default function VideoCard({
   onLike,
 }: VideoCardProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const playPromiseRef = useRef<Promise<void> | undefined>(undefined);
 
   // Playback state
   const [isPlaying, setIsPlaying] = useState(false);
@@ -41,17 +47,13 @@ export default function VideoCard({
 
   // Overlay animations
   const [showHeart, setShowHeart] = useState(false);
-  const [playIconState, setPlayIconState] = useState<"play" | "pause" | null>(
-    null
-  );
+  const [playIconState, setPlayIconState] = useState<"play" | "pause" | null>(null);
   const [showMuteToast, setShowMuteToast] = useState(false);
 
   const isActive = index === activeIndex;
-
-  // Mount cards that are active or up to 3 ahead (pre-buffer)
+  // Pre-buffer the next 3 cards so they're ready for instant swipe
   const shouldMount =
-    isActive ||
-    (index > activeIndex && index <= activeIndex + 3);
+    isActive || (index > activeIndex && index <= activeIndex + 3);
 
   // ── Autoplay / pause when active index changes ───────────────────────────
   useEffect(() => {
@@ -59,34 +61,14 @@ export default function VideoCard({
     if (!el) return;
 
     if (isActive) {
-      // Reset state for the new card
       setIsLoaded(false);
       setHasError(false);
       setProgress(0);
       el.currentTime = 0;
-
-      // Cancel any in-flight play() before starting a new one
-      const play = async () => {
-        try {
-          if (playPromiseRef.current) await playPromiseRef.current.catch(() => {});
-          playPromiseRef.current = el.play();
-          await playPromiseRef.current;
-        } catch {
-          // Autoplay policy or interrupted — silently ignore
-        }
-      };
-      play();
+      // Simple fire-and-forget — fastest path to playback
+      el.play().catch(() => { /* autoplay policy */ });
     } else {
-      // Safely pause: wait for any pending play() to settle first
-      const pause = async () => {
-        try {
-          if (playPromiseRef.current) await playPromiseRef.current.catch(() => {});
-          el.pause();
-        } catch {
-          /* ignore */
-        }
-      };
-      pause();
+      el.pause();
     }
   }, [isActive]);
 
@@ -106,7 +88,6 @@ export default function VideoCard({
     const now = Date.now();
 
     if (now - lastTap.current < 280) {
-      // Double tap → like + heart
       if (tapTimer.current) clearTimeout(tapTimer.current);
       tapTimer.current = null;
       lastTap.current = 0;
@@ -120,8 +101,7 @@ export default function VideoCard({
         const el = videoRef.current;
         if (!el) return;
         if (el.paused) {
-          playPromiseRef.current = el.play();
-          playPromiseRef.current?.catch(() => {});
+          el.play().catch(() => {});
           setPlayIconState("play");
         } else {
           el.pause();
@@ -156,57 +136,42 @@ export default function VideoCard({
     async (e: React.MouseEvent) => {
       e.stopPropagation();
       try {
-        await navigator.share({
-          url: video.driveShareUrl,
-          title: video.caption,
-        });
+        await navigator.share({ url: video.driveShareUrl, title: video.caption });
       } catch {
-        try {
-          await navigator.clipboard.writeText(video.driveShareUrl);
-        } catch {
-          /* ignore */
-        }
+        try { await navigator.clipboard.writeText(video.driveShareUrl); } catch { /* ignore */ }
       }
     },
     [video]
   );
 
   // ── Video event handlers ─────────────────────────────────────────────────
-  const onCanPlay = useCallback(() => setIsLoaded(true), []);
-  const onPlay = useCallback(() => setIsPlaying(true), []);
-  const onPause = useCallback(() => setIsPlaying(false), []);
-  const onError = useCallback(() => setHasError(true), []);
-  const onTimeUpdate = useCallback(
-    (e: React.SyntheticEvent<HTMLVideoElement>) => {
-      const el = e.currentTarget;
-      if (el.duration) setProgress(el.currentTime / el.duration);
-    },
-    []
-  );
+  const onCanPlay   = useCallback(() => setIsLoaded(true), []);
+  const onPlay      = useCallback(() => setIsPlaying(true), []);
+  const onPause     = useCallback(() => setIsPlaying(false), []);
+  const onError     = useCallback(() => setHasError(true), []);
+  const onTimeUpdate = useCallback((e: React.SyntheticEvent<HTMLVideoElement>) => {
+    const el = e.currentTarget;
+    if (el.duration) setProgress(el.currentTime / el.duration);
+  }, []);
 
-  const initials = (video.author ?? "W").slice(0, 1).toUpperCase();
+  const initials   = (video.author ?? "W").slice(0, 1).toUpperCase();
   const audioLabel = `Original Audio · @${video.author}`;
-
-  // Nav offset from CSS token (fallback 76px)
-  const NAV_OFFSET = 76;
 
   return (
     <div
-      className="relative w-full h-dvh overflow-hidden bg-black select-none"
+      className="relative w-full h-full overflow-hidden bg-black select-none"
       onClick={handleTap}
     >
-      {/* ── Video ────────────────────────────────────────────────────────── */}
+      {/* ── Video — fills the bounded card area (between header and nav) ──── */}
       {shouldMount && (
         <video
           ref={videoRef}
           src={video.streamUrl}
           className="absolute inset-0 w-full h-full object-contain bg-black"
           loop
-          muted /* always start muted; isMuted effect syncs after mount */
+          muted
           playsInline
           preload={isActive ? "auto" : "metadata"}
-          // Hint to the browser to prioritise fetching for the active video
-          {...(isActive ? { fetchPriority: "high" } : {})}
           onCanPlay={onCanPlay}
           onPlay={onPlay}
           onPause={onPause}
@@ -227,15 +192,11 @@ export default function VideoCard({
         <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none px-8">
           <div
             className="flex flex-col items-center gap-3 p-6 rounded-2xl text-center"
-            style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(12px)" }}
+            style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(12px)" }}
           >
-            <span className="text-white/40 text-3xl">⚠️</span>
             <p className="text-white/70 text-sm leading-snug">
-              Could not load video.{"\n"}Make sure the Drive file is set to{" "}
-              <span className="text-white font-semibold">
-                "Anyone with the link"
-              </span>
-              .
+              Could not load video. Make sure the Drive file is set to{" "}
+              <span className="text-white font-semibold">"Anyone with the link"</span>.
             </p>
           </div>
         </div>
@@ -245,11 +206,9 @@ export default function VideoCard({
       {playIconState && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-30">
           <div className="play-flash w-16 h-16 rounded-full bg-black/50 flex items-center justify-center">
-            {playIconState === "play" ? (
-              <Play size={28} className="text-white fill-white ml-1" />
-            ) : (
-              <Pause size={28} className="text-white fill-white" />
-            )}
+            {playIconState === "play"
+              ? <Play size={28} className="text-white fill-white ml-1" />
+              : <Pause size={28} className="text-white fill-white" />}
           </div>
         </div>
       )}
@@ -257,12 +216,7 @@ export default function VideoCard({
       {/* ── Double-tap heart burst ────────────────────────────────────────── */}
       {showHeart && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-30">
-          <Heart
-            className="heart-burst drop-shadow-2xl"
-            size={96}
-            fill="white"
-            color="white"
-          />
+          <Heart className="heart-burst drop-shadow-2xl" size={96} fill="white" color="white" />
         </div>
       )}
 
@@ -277,11 +231,9 @@ export default function VideoCard({
               border: "1px solid rgba(255,255,255,0.08)",
             }}
           >
-            {isMuted ? (
-              <VolumeX size={15} className="text-white" />
-            ) : (
-              <Volume2 size={15} className="text-white" />
-            )}
+            {isMuted
+              ? <VolumeX size={15} className="text-white" />
+              : <Volume2 size={15} className="text-white" />}
             <span className="text-white text-xs font-medium">
               {isMuted ? "Muted" : "Sound on"}
             </span>
@@ -289,10 +241,10 @@ export default function VideoCard({
         </div>
       )}
 
-      {/* ── RIGHT sidebar — above nav ─────────────────────────────────────── */}
+      {/* ── RIGHT sidebar ─────────────────────────────────────────────────── */}
       <div
         className="absolute right-3 flex flex-col items-center gap-6 z-20"
-        style={{ bottom: `${NAV_OFFSET}px` }}
+        style={{ bottom: `${CONTENT_BOTTOM}px` }}
       >
         {/* Avatar bubble */}
         <div className="relative">
@@ -303,9 +255,7 @@ export default function VideoCard({
             {initials}
           </div>
           <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-5 h-5 rounded-full bg-[#e1306c] flex items-center justify-center shadow-md">
-            <span className="text-white text-[10px] font-bold leading-none">
-              +
-            </span>
+            <span className="text-white text-[10px] font-bold leading-none">+</span>
           </div>
         </div>
 
@@ -318,16 +268,12 @@ export default function VideoCard({
         >
           <Heart
             size={30}
-            className={`drop-shadow-lg transition-all duration-150 ${
-              video.liked ? "scale-110" : "scale-100"
-            }`}
+            className={`drop-shadow-lg transition-all duration-150 ${video.liked ? "scale-110" : "scale-100"}`}
             color="white"
             fill={video.liked ? "#e1306c" : "none"}
             strokeWidth={video.liked ? 0 : 1.8}
           />
-          <span className="text-white text-[12px] font-semibold drop-shadow">
-            {video.likes}
-          </span>
+          <span className="text-white text-[12px] font-semibold drop-shadow">{video.likes}</span>
         </button>
 
         {/* Share */}
@@ -337,15 +283,8 @@ export default function VideoCard({
           aria-label="Share"
           id={`share-${video.id}`}
         >
-          <Send
-            size={27}
-            color="white"
-            strokeWidth={1.8}
-            className="drop-shadow-lg -rotate-12"
-          />
-          <span className="text-white text-[12px] font-semibold drop-shadow">
-            Share
-          </span>
+          <Send size={27} color="white" strokeWidth={1.8} className="drop-shadow-lg -rotate-12" />
+          <span className="text-white text-[12px] font-semibold drop-shadow">Share</span>
         </button>
 
         {/* Mute / unmute */}
@@ -355,21 +294,9 @@ export default function VideoCard({
           aria-label={isMuted ? "Unmute" : "Mute"}
           id={`mute-${video.id}`}
         >
-          {isMuted ? (
-            <VolumeX
-              size={26}
-              color="white"
-              strokeWidth={1.8}
-              className="drop-shadow-lg"
-            />
-          ) : (
-            <Volume2
-              size={26}
-              color="white"
-              strokeWidth={1.8}
-              className="drop-shadow-lg"
-            />
-          )}
+          {isMuted
+            ? <VolumeX size={26} color="white" strokeWidth={1.8} className="drop-shadow-lg" />
+            : <Volume2 size={26} color="white" strokeWidth={1.8} className="drop-shadow-lg" />}
         </button>
 
         {/* Spinning music disc */}
@@ -385,17 +312,13 @@ export default function VideoCard({
       </div>
 
       {/* ── BOTTOM-LEFT: author + caption + audio ─────────────────────────── */}
-      {/*
-       * No gradient overlay — text uses drop-shadow + text-shadow for legibility
-       * against any video frame, without dimming the entire video.
-       */}
       <div
         className="absolute left-0 right-16 px-4 z-20 pointer-events-none"
-        style={{ bottom: `${NAV_OFFSET}px` }}
+        style={{ bottom: `${CONTENT_BOTTOM}px` }}
       >
         <p
           className="text-white font-bold text-[15px] mb-1"
-          style={{ textShadow: "0 1px 6px rgba(0,0,0,0.9), 0 0 2px rgba(0,0,0,0.7)" }}
+          style={{ textShadow: "0 1px 6px rgba(0,0,0,0.9)" }}
         >
           @{video.author}
         </p>
@@ -408,32 +331,21 @@ export default function VideoCard({
           </p>
         )}
         <div className="flex items-center gap-1.5 overflow-hidden">
-          <span
-            className="text-white/80 text-[13px] flex-shrink-0"
-            style={{ textShadow: "0 1px 4px rgba(0,0,0,0.7)" }}
-          >
-            ♪
-          </span>
+          <span className="text-white/80 text-[13px] flex-shrink-0" style={{ textShadow: "0 1px 4px rgba(0,0,0,0.7)" }}>♪</span>
           <div className="overflow-hidden flex-1">
-            <span
-              className="text-white/65 text-[12px] marquee-text"
-              style={{ textShadow: "0 1px 3px rgba(0,0,0,0.7)" }}
-            >
+            <span className="text-white/65 text-[12px] marquee-text" style={{ textShadow: "0 1px 3px rgba(0,0,0,0.7)" }}>
               {audioLabel}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{audioLabel}
             </span>
           </div>
         </div>
       </div>
 
-      {/* ── Progress bar (sits just above the nav) ────────────────────────── */}
+      {/* ── Progress bar ──────────────────────────────────────────────────── */}
       <div
         className="absolute left-0 right-0 h-[2px] bg-white/15 z-30 pointer-events-none"
-        style={{ bottom: `${NAV_OFFSET - 4}px` }}
+        style={{ bottom: `${CONTENT_BOTTOM - 4}px` }}
       >
-        <div
-          className="h-full bg-white transition-none"
-          style={{ width: `${progress * 100}%` }}
-        />
+        <div className="h-full bg-white transition-none" style={{ width: `${progress * 100}%` }} />
       </div>
     </div>
   );

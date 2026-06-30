@@ -3,25 +3,23 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Search, X } from "lucide-react";
 
+const HEADER_H = 56; // must match feed layout and VideoCard constant
+
 interface FeedHeaderProps {
   onSearch: (query: string) => void;
 }
 
 /**
- * FeedHeader
- * Floats above the video feed. No gradient overlay — video plays at full brightness.
- * A subtle text-shadow on the title keeps it legible against any background.
- * The search icon toggles a slide-in input for filtering by caption / author.
+ * FeedHeader — solid black bar at the top of the feed.
+ * Sits above (not over) the video area so no content is hidden behind it.
  */
 export default function FeedHeader({ onSearch }: FeedHeaderProps) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Focus input when opened
   useEffect(() => {
     if (searchOpen) {
-      // Slight delay so the animation starts first
       const t = setTimeout(() => inputRef.current?.focus(), 80);
       return () => clearTimeout(t);
     }
@@ -53,21 +51,17 @@ export default function FeedHeader({ onSearch }: FeedHeaderProps) {
 
   return (
     <div
-      className="fixed top-0 left-0 right-0 z-40 flex items-center justify-between px-4 gap-3"
+      className="flex items-center justify-between px-4 gap-3 shrink-0 border-b border-neutral-900"
       style={{
-        paddingTop: "max(14px, env(safe-area-inset-top, 14px))",
-        paddingBottom: "12px",
-        // No gradient — just pointer events passthrough for the background
-        pointerEvents: "none",
+        height: `${HEADER_H}px`,
+        background: "#000",
       }}
     >
-      {/* App name — always visible, shrinks when search is open */}
+      {/* App name */}
       <span
-        className="text-white font-bold text-[22px] tracking-tight select-none shrink-0 transition-all duration-300"
+        className="text-white font-bold text-[20px] tracking-tight select-none transition-all duration-300 shrink-0"
         style={{
           fontFamily: "var(--font-inter)",
-          textShadow: "0 1px 12px rgba(0,0,0,0.8), 0 0 4px rgba(0,0,0,0.6)",
-          pointerEvents: "none",
           opacity: searchOpen ? 0 : 1,
           width: searchOpen ? 0 : "auto",
           overflow: "hidden",
@@ -76,13 +70,10 @@ export default function FeedHeader({ onSearch }: FeedHeaderProps) {
         Wisegrams
       </span>
 
-      {/* Search area — grows to fill when open */}
+      {/* Search area */}
       <div
         className="flex items-center gap-2 transition-all duration-300"
-        style={{
-          flex: searchOpen ? "1 1 auto" : "0 0 auto",
-          pointerEvents: "auto",
-        }}
+        style={{ flex: searchOpen ? "1 1 auto" : "0 0 auto" }}
       >
         {searchOpen ? (
           <div className="flex items-center gap-2 w-full search-expand">
@@ -98,7 +89,7 @@ export default function FeedHeader({ onSearch }: FeedHeaderProps) {
                 value={query}
                 onChange={handleChange}
                 onKeyDown={handleKeyDown}
-                placeholder="Search videos..."
+                placeholder="Search by caption or author…"
                 className="search-input w-full pl-9 pr-3 py-2 text-sm"
                 autoComplete="off"
                 autoCorrect="off"
@@ -110,11 +101,7 @@ export default function FeedHeader({ onSearch }: FeedHeaderProps) {
               onClick={handleClose}
               aria-label="Close search"
               id="search-close-btn"
-              className="w-8 h-8 flex items-center justify-center rounded-full text-white/70 hover:text-white active:scale-90 transition-all shrink-0"
-              style={{
-                background: "rgba(255,255,255,0.1)",
-                backdropFilter: "blur(6px)",
-              }}
+              className="w-8 h-8 flex items-center justify-center rounded-full text-white/70 hover:text-white active:scale-90 transition-all shrink-0 bg-white/10"
             >
               <X size={15} />
             </button>
@@ -124,15 +111,9 @@ export default function FeedHeader({ onSearch }: FeedHeaderProps) {
             onClick={handleOpen}
             aria-label="Search videos"
             id="feed-search-btn"
-            className="w-9 h-9 flex items-center justify-center rounded-full active:scale-90 transition-transform"
-            style={{
-              background: "rgba(0,0,0,0.25)",
-              backdropFilter: "blur(8px)",
-              WebkitBackdropFilter: "blur(8px)",
-              border: "1px solid rgba(255,255,255,0.12)",
-            }}
+            className="w-9 h-9 flex items-center justify-center rounded-full active:scale-90 transition-transform bg-neutral-900 border border-neutral-800"
           >
-            <Search size={18} className="text-white" strokeWidth={2} />
+            <Search size={17} className="text-white" strokeWidth={2} />
           </button>
         )}
       </div>
