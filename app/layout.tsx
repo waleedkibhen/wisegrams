@@ -35,10 +35,17 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${inter.variable} h-full`}>
-      <body className="bg-background text-foreground antialiased h-full overflow-hidden">
-        {children}
-        {/* Global modals are rendered here so they can be triggered from anywhere */}
-        <GlobalModals />
+      {/* 
+        The body is a centered flex container with a dark background.
+        The actual app is constrained to a mobile width (max-w-[430px]) 
+        so it looks perfect on both desktop and mobile devices.
+      */}
+      <body className="bg-neutral-950 text-foreground antialiased h-full overflow-hidden flex justify-center">
+        <div className="w-full h-full max-w-[430px] bg-black relative border-x border-neutral-900 shadow-2xl overflow-hidden flex flex-col">
+          {children}
+          {/* Global modals are rendered inside the mobile container */}
+          <GlobalModals />
+        </div>
       </body>
     </html>
   );

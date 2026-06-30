@@ -2,19 +2,20 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, PlusCircle, User } from "lucide-react";
+import { Home, PlusSquare, User, Film } from "lucide-react";
 import { useVideoStore } from "@/hooks/useVideoStore";
 
 export default function BottomNav() {
   const pathname = usePathname();
   const setShowUploadModal = useVideoStore((s) => s.setShowUploadModal);
   const isProfile = pathname === "/profile";
+  const isFeed = pathname === "/feed";
 
   return (
     <nav
-      className="w-full flex items-center justify-around shrink-0 border-t border-neutral-900"
+      className="w-full flex items-center justify-around shrink-0 border-t border-[#262626]"
       style={{
-        height: "64px",
+        height: "50px",
         paddingBottom: "env(safe-area-inset-bottom, 0px)",
         background: "#000",
       }}
@@ -25,37 +26,44 @@ export default function BottomNav() {
         href="/feed"
         id="nav-home"
         aria-label="Home"
-        className="flex flex-col items-center justify-center gap-1 min-w-[72px] group"
+        className="flex flex-col items-center justify-center p-2 group"
       >
         <Home
-          size={24}
-          className={`transition-all duration-150 group-active:scale-90 ${
-            !isProfile ? "text-white" : "text-neutral-500 group-hover:text-neutral-300"
+          size={26}
+          className={`transition-all duration-150 group-active:scale-95 ${
+            isFeed ? "text-white" : "text-white/60"
           }`}
-          strokeWidth={!isProfile ? 2.4 : 1.8}
-          fill={!isProfile ? "white" : "none"}
+          strokeWidth={isFeed ? 2.5 : 1.8}
+          fill={isFeed ? "white" : "none"}
         />
-        <span className={`text-[10px] font-medium tracking-wide transition-colors ${!isProfile ? "text-white" : "text-neutral-600"}`}>
-          Home
-        </span>
       </Link>
 
-      {/* Upload pill */}
+      {/* Explore/Search (Placeholder for now) */}
+      <button
+        aria-label="Search"
+        disabled
+        className="flex flex-col items-center justify-center p-2 opacity-30"
+      >
+        <Film size={26} strokeWidth={1.8} className="text-white" />
+      </button>
+
+      {/* Upload - Instagram style square with plus */}
       <button
         id="nav-create"
         aria-label="Upload video"
         onClick={() => setShowUploadModal(true)}
-        className="flex items-center justify-center group"
+        className="flex flex-col items-center justify-center p-2 group active:scale-90 transition-transform"
       >
-        <span
-          className="flex items-center justify-center w-14 h-10 rounded-2xl transition-all duration-200 group-active:scale-90 group-hover:opacity-90 shadow-lg"
-          style={{
-            background: "linear-gradient(135deg, #7c3aed 0%, #a855f7 100%)",
-            boxShadow: "0 4px 18px rgba(124, 58, 237, 0.4)",
-          }}
-        >
-          <PlusCircle size={22} className="text-white" strokeWidth={2} />
-        </span>
+        <PlusSquare size={26} strokeWidth={2} className="text-white" />
+      </button>
+
+      {/* Reels (Placeholder for now) */}
+      <button
+        aria-label="Reels"
+        disabled
+        className="flex flex-col items-center justify-center p-2 opacity-30"
+      >
+        <Film size={26} strokeWidth={1.8} className="text-white" />
       </button>
 
       {/* Profile */}
@@ -63,19 +71,16 @@ export default function BottomNav() {
         href="/profile"
         id="nav-profile"
         aria-label="Profile"
-        className="flex flex-col items-center justify-center gap-1 min-w-[72px] group"
+        className="flex flex-col items-center justify-center p-2 group"
       >
-        <User
-          size={24}
-          className={`transition-all duration-150 group-active:scale-90 ${
-            isProfile ? "text-white" : "text-neutral-500 group-hover:text-neutral-300"
-          }`}
-          strokeWidth={isProfile ? 2.4 : 1.8}
-          fill={isProfile ? "white" : "none"}
-        />
-        <span className={`text-[10px] font-medium tracking-wide transition-colors ${isProfile ? "text-white" : "text-neutral-600"}`}>
-          Profile
-        </span>
+        <div className={`rounded-full p-[2px] transition-all duration-150 group-active:scale-95 ${isProfile ? "border-[1.5px] border-white" : "border-transparent"}`}>
+           <User
+            size={22}
+            className={`${isProfile ? "text-white" : "text-white/60"}`}
+            strokeWidth={isProfile ? 2.5 : 1.8}
+            fill={isProfile ? "white" : "none"}
+          />
+        </div>
       </Link>
     </nav>
   );

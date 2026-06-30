@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef } from "react";
-import { X, Link as LinkIcon, CheckCircle, AlertCircle, Loader } from "lucide-react";
+import { Link as LinkIcon, AlertCircle, Loader } from "lucide-react";
 import { isValidDriveLink } from "@/lib/driveUtils";
 import { useVideoStore } from "@/hooks/useVideoStore";
 
@@ -9,7 +9,7 @@ interface UploadModalProps {
   onClose: () => void;
 }
 
-type UploadState = "idle" | "loading" | "success" | "error";
+type UploadState = "idle" | "loading" | "error";
 
 export default function UploadModal({ onClose }: UploadModalProps) {
   const [driveUrl, setDriveUrl] = useState("");
@@ -30,7 +30,7 @@ export default function UploadModal({ onClose }: UploadModalProps) {
         return;
       }
       if (!isValidDriveLink(trimmed)) {
-        setErrorMsg("That doesn't look like a Google Drive link. Make sure it contains a file ID.");
+        setErrorMsg("Doesn't look like a valid Google Drive link.");
         setState("error");
         return;
       }
@@ -39,8 +39,7 @@ export default function UploadModal({ onClose }: UploadModalProps) {
       setErrorMsg("");
       await new Promise((r) => setTimeout(r, 600));
       addVideo(trimmed, caption.trim() || "✨ New reel");
-      setState("success");
-      setTimeout(onClose, 1200);
+      onClose();
     },
     [driveUrl, caption, addVideo, onClose]
   );
@@ -56,138 +55,114 @@ export default function UploadModal({ onClose }: UploadModalProps) {
   }, []);
 
   return (
-    /* Backdrop */
+    /* Backdrop - sits absolute inside the mobile container */
     <div
-      className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center fade-in"
-      style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(6px)" }}
+      className="absolute inset-0 z-[100] flex flex-col justify-end fade-in"
+      style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(2px)" }}
       onClick={(e) => e.target === e.currentTarget && onClose()}
       role="dialog"
       aria-modal
       aria-label="Upload video"
     >
-      {/* Sheet */}
+      {/* Sheet - takes up about 80% height, rounded at top */}
       <div
-        className="w-full sm:max-w-lg slide-up"
+        className="w-full bg-[#262626] rounded-t-[20px] flex flex-col slide-up"
         style={{
-          background: "#0f0f0f",
-          border: "1px solid rgba(255,255,255,0.07)",
-          borderRadius: "28px 28px 0 0",
+          maxHeight: "85%",
+          boxShadow: "0 -4px 24px rgba(0,0,0,0.5)",
         }}
       >
-        {/* Drag handle */}
-        <div className="flex justify-center pt-4 pb-1">
-          <div className="w-10 h-1 rounded-full bg-neutral-700" />
+        {/* Header - Instagram style (Cancel, Title, Share) */}
+        <div className="flex items-center justify-between px-4 py-3 border-b border-[#363636] shrink-0">
+          <button
+            onClick={onClose}
+            className="text-white text-[15px] hover:opacity-70 transition-opacity"
+            id="upload-modal-close"
+          >
+            Cancel
+          </button>
+          <h2 className="text-white text-[16px] font-semibold tracking-tight">New Reel</h2>
+          <button
+            onClick={handleSubmit}
+            disabled={state === "loading" || !driveUrl.trim()}
+            className="text-[#0095F6] font-semibold text-[15px] disabled:opacity-50 hover:text-white transition-colors"
+            id="upload-submit-top"
+          >
+            {state === "loading" ? <Loader size={16} className="animate-spin inline" /> : "Share"}
+          </button>
         </div>
 
-        <div className="px-6 pb-10 sm:pb-8 pt-3">
-          {/* Header */}
-          <div className="flex items-start justify-between mb-8">
-            <div>
-              <h2 className="text-white text-[22px] font-bold tracking-tight">Add a Video</h2>
-              <p className="text-neutral-500 text-[14px] mt-1">Paste your Google Drive share link</p>
+        {/* Content Area - Scrollable */}
+        <div className="flex-1 overflow-y-auto px-4 pt-5 pb-8 flex flex-col gap-6">
+          
+          {/* Drive URL Input */}
+          <div className="flex flex-col gap-2">
+            <label className="text-[#A8A8A8] text-[13px] font-medium ml-1">
+              Google Drive Link
+            </label>
+            <div className="relative flex items-center">
+              <LinkIcon size={18} className="absolute left-3.5 text-[#A8A8A8] pointer-events-none" />
+              <input
+                ref={inputRef}
+                id="drive-url-input"
+                type="url"
+                value={driveUrl}
+                onChange={(e) => { setDriveUrl(e.target.value); setState("idle"); }}
+                placeholder="Paste link here..."
+                className="w-full pl-10 pr-20 py-3.5 text-[15px] bg-[#121212] text-white rounded-xl focus:outline-none focus:ring-1 focus:ring-[#363636]"
+                autoComplete="off"
+                autoCapitalize="none"
+                spellCheck={false}
+              />
+              <button
+                type="button"
+                onClick={handlePaste}
+                className="absolute right-2 text-[#0095F6] text-[14px] font-semibold px-3 py-1.5 hover:bg-white/5 rounded-lg transition-colors"
+                id="paste-drive-link"
+              >
+                Paste
+              </button>
             </div>
-            <button
-              onClick={onClose}
-              className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-white/10 transition-colors mt-0.5"
-              aria-label="Close"
-              id="upload-modal-close"
-              style={{ background: "rgba(255,255,255,0.06)" }}
-            >
-              <X size={18} className="text-neutral-400" />
-            </button>
           </div>
 
-          <form onSubmit={handleSubmit} className="flex flex-col gap-6">
-            {/* Drive URL */}
-            <div className="flex flex-col gap-2.5">
-              <label className="text-neutral-400 text-[12px] font-semibold uppercase tracking-widest">
-                Google Drive Link
-              </label>
-              <div className="relative flex items-center">
-                <LinkIcon size={16} className="absolute left-4 text-neutral-500 pointer-events-none shrink-0" />
-                <input
-                  ref={inputRef}
-                  id="drive-url-input"
-                  type="url"
-                  value={driveUrl}
-                  onChange={(e) => { setDriveUrl(e.target.value); setState("idle"); }}
-                  placeholder="https://drive.google.com/file/d/…"
-                  className="w-full pl-11 pr-20 py-4 text-[15px] rounded-2xl"
-                  autoComplete="off"
-                  autoCapitalize="none"
-                  spellCheck={false}
-                />
-                <button
-                  type="button"
-                  onClick={handlePaste}
-                  className="absolute right-3 text-[13px] font-semibold px-3 py-1.5 rounded-xl transition-colors"
-                  style={{ color: "var(--accent-light)", background: "rgba(124,58,237,0.12)" }}
-                  id="paste-drive-link"
-                >
-                  Paste
-                </button>
-              </div>
-            </div>
-
-            {/* Caption */}
-            <div className="flex flex-col gap-2.5">
-              <label className="text-neutral-400 text-[12px] font-semibold uppercase tracking-widest">
-                Caption
-              </label>
+          {/* Caption Input */}
+          <div className="flex flex-col gap-2">
+            <label className="text-[#A8A8A8] text-[13px] font-medium ml-1">
+              Caption
+            </label>
+            <div className="bg-[#121212] rounded-xl overflow-hidden focus-within:ring-1 focus-within:ring-[#363636]">
               <textarea
                 id="video-caption-input"
                 value={caption}
                 onChange={(e) => setCaption(e.target.value)}
-                placeholder="Write a caption… ✨"
-                rows={4}
-                className="w-full px-4 py-4 text-[15px] rounded-2xl resize-none leading-relaxed"
+                placeholder="Write a caption..."
+                rows={5}
+                className="w-full px-4 pt-4 pb-2 text-[15px] bg-transparent text-white resize-none outline-none leading-relaxed"
                 maxLength={200}
               />
-              <p className="text-right text-neutral-600 text-[12px] -mt-1">{caption.length}/200</p>
+              <div className="flex justify-end px-3 pb-2">
+                <span className="text-[#A8A8A8] text-[12px] font-medium">
+                  {caption.length}/200
+                </span>
+              </div>
             </div>
+          </div>
 
-            {/* Error */}
-            {state === "error" && (
-              <div className="flex items-start gap-3 p-4 rounded-2xl" style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)" }}>
-                <AlertCircle size={16} className="text-red-400 mt-0.5 shrink-0" />
-                <p className="text-red-300 text-[14px] leading-relaxed">{errorMsg}</p>
-              </div>
-            )}
-
-            {/* Success */}
-            {state === "success" && (
-              <div className="flex items-center gap-3 p-4 rounded-2xl" style={{ background: "rgba(34,197,94,0.08)", border: "1px solid rgba(34,197,94,0.2)" }}>
-                <CheckCircle size={16} className="text-green-400 shrink-0" />
-                <p className="text-green-300 text-[14px]">Video added to your feed!</p>
-              </div>
-            )}
-
-            {/* Submit */}
-            <button
-              id="upload-submit"
-              type="submit"
-              disabled={state === "loading" || state === "success"}
-              className="w-full py-4 rounded-2xl font-bold text-[16px] transition-all duration-200 flex items-center justify-center gap-2.5"
-              style={{
-                background: state === "loading" || state === "success"
-                  ? "rgba(124,58,237,0.45)"
-                  : "linear-gradient(135deg, #7c3aed 0%, #a855f7 100%)",
-                color: "white",
-                boxShadow: state === "idle" ? "0 4px 20px rgba(124,58,237,0.4)" : "none",
-              }}
-            >
-              {state === "loading" && <Loader size={16} className="animate-spin" />}
-              {state === "success" && <CheckCircle size={16} />}
-              {state === "loading" ? "Adding video…" : state === "success" ? "Added!" : "Add to Feed"}
-            </button>
-          </form>
+          {/* Error Message */}
+          {state === "error" && (
+            <div className="flex items-start gap-2.5 p-3.5 rounded-xl bg-red-500/10 border border-red-500/20">
+              <AlertCircle size={18} className="text-red-400 shrink-0 mt-0.5" />
+              <p className="text-red-200 text-[14px] leading-snug">{errorMsg}</p>
+            </div>
+          )}
 
           {/* Hint */}
-          <p className="text-neutral-600 text-[13px] text-center mt-6 leading-relaxed">
-            Set file sharing to{" "}
-            <span className="text-neutral-400 font-medium">"Anyone with the link"</span>{" "}
-            in Google Drive.
-          </p>
+          <div className="mt-auto pt-6 text-center">
+             <p className="text-[#A8A8A8] text-[13px] leading-relaxed">
+              Ensure file sharing is set to <br/>
+              <span className="text-white font-medium">"Anyone with the link"</span> in Google Drive.
+            </p>
+          </div>
         </div>
       </div>
     </div>
