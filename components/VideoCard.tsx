@@ -10,7 +10,6 @@ import {
   Heart,
   MessageCircle,
   Send,
-  MoreVertical,
   Play,
   Pause,
   VolumeX,
@@ -19,12 +18,14 @@ import {
 } from "lucide-react";
 import type { VideoPost } from "@/lib/storage";
 
-// Height of the solid header bar
-const HEADER_H = 56;
-// Height of the solid bottom nav
 const NAV_H = 50;
-// Content bottom offset
 const CONTENT_BOTTOM = NAV_H + 16;
+
+// iOS Safari hard limit on concurrent media connections is 4.
+// Keeping only 1 lookahead means max 2 connections at any time:
+// the active video and the next one. This prevents the "stuck on
+// first frame after returning to the app" bug entirely.
+const LOOKAHEAD = 1;
 
 interface VideoCardProps {
   video: VideoPost;
@@ -40,80 +41,96 @@ export default function VideoCard({
   onLike,
 }: VideoCardProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const isMountedRef = useRef(true);
 
-  // Playback state
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(true);
   const [progress, setProgress] = useState(0);
   const [isLoaded, setIsLoaded] = useState(false);
   const [hasError, setHasError] = useState(false);
-
-  // Overlay animations
   const [showHeart, setShowHeart] = useState(false);
   const [playIconState, setPlayIconState] = useState<"play" | "pause" | null>(null);
   const [showMuteToast, setShowMuteToast] = useState(false);
 
   const isActive = index === activeIndex;
-  const shouldMount =
-    isActive || (index > activeIndex && index <= activeIndex + 3);
+  // Only keep this card's media pipeline alive if it's active or immediately next
+  const shouldHaveSrc = isActive || index === activeIndex + LOOKAHEAD;
 
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => { isMountedRef.current = false; };
+  }, []);
+
+  // ── Core media management ────────────────────────────────────────────────
   useEffect(() => {
     const el = videoRef.current;
     if (!el) return;
 
-    if (shouldMount) {
-      // If the source isn't set, set it and load
-      if (el.getAttribute("src") !== video.streamUrl) {
-        el.setAttribute("src", video.streamUrl);
+    if (shouldHaveSrc) {
+      // Set src if not already set to this URL
+      if (el.src !== video.streamUrl && el.getAttribute("data-src") !== video.streamUrl) {
+        el.setAttribute("data-src", video.streamUrl);
+        el.src = video.streamUrl;
         el.load();
       }
-      
+
       if (isActive) {
-        setIsLoaded(false);
-        setHasError(false);
-        setProgress(0);
-        el.currentTime = 0;
         el.preload = "auto";
-        // Simple fire-and-forget
-        el.play().catch(() => {});
+        el.currentTime = 0;
+        if (isMountedRef.current) {
+          setIsLoaded(false);
+          setHasError(false);
+          setProgress(0);
+        }
+        el.play().catch(() => {
+          // Autoplay blocked — this is fine, user can tap to play
+        });
       } else {
-        el.pause();
         el.preload = "metadata";
+        el.pause();
       }
     } else {
-      // CRITICAL FIX: Properly destroy the video stream to release browser connections and memory.
-      // If we don't do this, mobile browsers (iOS Safari/Chrome) will hit their connection limit 
-      // (usually 6) with dangling requests and all new videos will stall on the first frame forever.
-      el.pause();
-      el.removeAttribute("src");
-      el.load();
-    }
-  }, [isActive, shouldMount, video.streamUrl]);
-
-  // Gracefully handle OS backgrounding (app switching)
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      const el = videoRef.current;
-      if (!el || !isActive) return;
-      
-      if (document.hidden) {
+      // ── Release media pipeline: free the network connection and hardware decoder ──
+      // On iOS Safari/Chrome, NOT doing this causes all subsequent videos to
+      // stall indefinitely because the browser runs out of media connections.
+      if (el.src) {
         el.pause();
-      } else {
-        // Resume playback when returning to the app
+        el.src = "";
+        el.removeAttribute("data-src");
+        el.load(); // Flushes the media buffer & releases the connection slot
+      }
+    }
+  }, [isActive, shouldHaveSrc, video.streamUrl]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Recover playback when app returns from background ────────────────────
+  useEffect(() => {
+    if (!isActive) return;
+
+    const handleVisibility = () => {
+      const el = videoRef.current;
+      if (!el || !isMountedRef.current) return;
+
+      if (!document.hidden && el.paused) {
+        // Re-attach src if it was cleared (can happen on some mobile browsers)
+        if (!el.src || el.src === window.location.href) {
+          el.src = video.streamUrl;
+          el.load();
+        }
         el.play().catch(() => {});
       }
     };
-    
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
-  }, [isActive]);
 
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, [isActive, video.streamUrl]);
+
+  // ── Mute sync ─────────────────────────────────────────────────────────────
   useEffect(() => {
     const el = videoRef.current;
-    if (!el) return;
-    el.muted = isMuted;
+    if (el) el.muted = isMuted;
   }, [isMuted]);
 
+  // ── Tap handler (single = play/pause, double = like) ─────────────────────
   const tapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTap = useRef(0);
 
@@ -127,7 +144,7 @@ export default function VideoCard({
       lastTap.current = 0;
       if (!video.liked) onLike(video.id);
       setShowHeart(true);
-      setTimeout(() => setShowHeart(false), 900);
+      setTimeout(() => { if (isMountedRef.current) setShowHeart(false); }, 900);
     } else {
       lastTap.current = now;
       tapTimer.current = setTimeout(() => {
@@ -141,58 +158,51 @@ export default function VideoCard({
           el.pause();
           setPlayIconState("pause");
         }
-        setTimeout(() => setPlayIconState(null), 600);
+        setTimeout(() => { if (isMountedRef.current) setPlayIconState(null); }, 600);
       }, 220);
     }
   }, [isActive, onLike, video]);
 
+  const handleLike = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    onLike(video.id);
+  }, [onLike, video.id]);
+
+  const handleShare = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await navigator.share({ url: video.driveShareUrl, title: video.caption });
+    } catch {
+      try { await navigator.clipboard.writeText(video.driveShareUrl); } catch { /* ignore */ }
+    }
+  }, [video]);
+
   const handleMuteToggle = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
-    setIsMuted((m) => {
+    setIsMuted(m => {
       setShowMuteToast(true);
-      setTimeout(() => setShowMuteToast(false), 1200);
+      setTimeout(() => { if (isMountedRef.current) setShowMuteToast(false); }, 1400);
       return !m;
     });
   }, []);
 
-  const handleLike = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation();
-      onLike(video.id);
-    },
-    [onLike, video.id]
-  );
-
-  const handleShare = useCallback(
-    async (e: React.MouseEvent) => {
-      e.stopPropagation();
-      try {
-        await navigator.share({ url: video.driveShareUrl, title: video.caption });
-      } catch {
-        try { await navigator.clipboard.writeText(video.driveShareUrl); } catch { /* ignore */ }
-      }
-    },
-    [video]
-  );
-
-  const onCanPlay   = useCallback(() => setIsLoaded(true), []);
-  const onPlay      = useCallback(() => setIsPlaying(true), []);
-  const onPause     = useCallback(() => setIsPlaying(false), []);
-  const onError     = useCallback(() => setHasError(true), []);
+  const onCanPlay = useCallback(() => { if (isMountedRef.current) setIsLoaded(true); }, []);
+  const onPlay = useCallback(() => { if (isMountedRef.current) setIsPlaying(true); }, []);
+  const onPause = useCallback(() => { if (isMountedRef.current) setIsPlaying(false); }, []);
+  const onError = useCallback(() => { if (isMountedRef.current) setHasError(true); }, []);
   const onTimeUpdate = useCallback((e: React.SyntheticEvent<HTMLVideoElement>) => {
     const el = e.currentTarget;
-    if (el.duration) setProgress(el.currentTime / el.duration);
+    if (el.duration && isMountedRef.current) setProgress(el.currentTime / el.duration);
   }, []);
 
-  const initials   = (video.author ?? "W").slice(0, 1).toUpperCase();
-  const audioLabel = `Original audio`;
+  const initials = (video.author ?? "W")[0].toUpperCase();
 
   return (
     <div
       className="relative w-full h-full overflow-hidden bg-black select-none"
       onClick={handleTap}
     >
-      {/* Video */}
+      {/* ── The single video element — always in DOM, src is managed imperatively ── */}
       <video
         ref={videoRef}
         className="absolute inset-0 w-full h-full object-contain bg-black"
@@ -206,130 +216,148 @@ export default function VideoCard({
         onError={onError}
       />
 
-      {/* Play/Pause indicator */}
-      {playIconState && (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-30">
-          <div className="play-flash w-16 h-16 rounded-full bg-black/40 flex items-center justify-center">
-            {playIconState === "play"
-              ? <Play size={32} className="text-white fill-white ml-1" />
-              : <Pause size={32} className="text-white fill-white" />}
-          </div>
-        </div>
-      )}
-
-      {/* Double tap heart */}
-      {showHeart && (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-30">
-          <Heart className="heart-burst drop-shadow-2xl" size={100} fill="#FF3040" color="#FF3040" strokeWidth={0} />
-        </div>
-      )}
-
-      {/* Mute Toast */}
-      {showMuteToast && (
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none z-40 fade-in">
-          <div className="bg-black/70 rounded-full px-4 py-2 flex items-center gap-2 backdrop-blur-md">
-            {isMuted ? <VolumeX size={16} className="text-white" /> : <Volume2 size={16} className="text-white" />}
-            <span className="text-white text-[13px] font-medium">{isMuted ? "Video muted" : "Video sound on"}</span>
-          </div>
-        </div>
-      )}
-
-      {/* Loading & Error */}
+      {/* Loading spinner */}
       {isActive && !isLoaded && !hasError && (
         <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none">
-          <div className="w-8 h-8 rounded-full border-[3px] border-white/20 border-t-white animate-spin" />
+          <div className="w-10 h-10 rounded-full border-[3px] border-white/20 border-t-white animate-spin" />
         </div>
       )}
+
+      {/* Error */}
       {isActive && hasError && (
         <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none px-8">
-          <div className="bg-black/70 backdrop-blur-md p-6 rounded-2xl text-center">
-            <p className="text-white/80 text-sm">Failed to load video.</p>
+          <div className="bg-black/80 p-5 rounded-2xl text-center">
+            <p className="text-white text-sm leading-relaxed">
+              Could not load video. Make sure Drive sharing is set to&nbsp;
+              <strong>"Anyone with the link"</strong>.
+            </p>
           </div>
         </div>
       )}
 
-      {/* ── RIGHT Sidebar (Instagram Reels Style) ───────────────────────── */}
+      {/* Play/pause flash */}
+      {playIconState && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-30">
+          <div className="play-flash w-16 h-16 rounded-full bg-black/50 flex items-center justify-center">
+            {playIconState === "play"
+              ? <Play size={30} className="text-white fill-white ml-1" />
+              : <Pause size={30} className="text-white fill-white" />}
+          </div>
+        </div>
+      )}
+
+      {/* Double-tap heart */}
+      {showHeart && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-30">
+          <Heart className="heart-burst" size={96} fill="#FF3040" color="#FF3040" strokeWidth={0} />
+        </div>
+      )}
+
+      {/* Mute toast */}
+      {showMuteToast && (
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none z-40 fade-in">
+          <div className="bg-black/70 rounded-full px-5 py-2.5 flex items-center gap-2.5">
+            {isMuted
+              ? <VolumeX size={17} className="text-white" />
+              : <Volume2 size={17} className="text-white" />}
+            <span className="text-white text-sm font-medium">
+              {isMuted ? "Muted" : "Sound on"}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* ── Right sidebar ─────────────────────────────────────────────────── */}
       <div
-        className="absolute right-3 flex flex-col items-center gap-[22px] z-20"
+        className="absolute right-3 flex flex-col items-center gap-6 z-20"
         style={{ bottom: `${CONTENT_BOTTOM}px` }}
       >
-        <button className="flex flex-col items-center gap-1.5" onClick={handleLike}>
+        {/* Like */}
+        <button className="flex flex-col items-center gap-1" onClick={handleLike}>
           <Heart
-            size={28}
-            className={`drop-shadow-lg transition-transform ${video.liked ? "scale-110" : "scale-100"}`}
+            size={30}
             color={video.liked ? "#FF3040" : "white"}
             fill={video.liked ? "#FF3040" : "none"}
-            strokeWidth={video.liked ? 0 : 2}
+            strokeWidth={2}
+            className="drop-shadow-lg"
           />
           <span className="text-white text-[12px] font-semibold drop-shadow">{video.likes}</span>
         </button>
 
-        <button className="flex flex-col items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
-          <MessageCircle size={28} color="white" strokeWidth={2} className="drop-shadow-lg scale-x-[-1]" />
-          <span className="text-white text-[12px] font-semibold drop-shadow">3</span>
+        {/* Comment (visual only) */}
+        <button className="flex flex-col items-center gap-1" onClick={e => e.stopPropagation()}>
+          <MessageCircle size={30} color="white" strokeWidth={2} className="drop-shadow-lg scale-x-[-1]" />
+          <span className="text-white text-[12px] font-semibold drop-shadow">0</span>
         </button>
 
-        <button className="flex flex-col items-center gap-1.5" onClick={handleShare}>
+        {/* Share */}
+        <button className="flex flex-col items-center gap-1" onClick={handleShare}>
           <Send size={28} color="white" strokeWidth={2} className="drop-shadow-lg" />
           <span className="text-white text-[12px] font-semibold drop-shadow">Share</span>
         </button>
 
-        <button className="flex flex-col items-center" onClick={(e) => e.stopPropagation()}>
-          <MoreVertical size={24} color="white" strokeWidth={2} className="drop-shadow-lg" />
+        {/* Mute */}
+        <button onClick={handleMuteToggle} className="mt-1">
+          {isMuted
+            ? <VolumeX size={26} color="white" strokeWidth={2} className="drop-shadow-lg" />
+            : <Volume2 size={26} color="white" strokeWidth={2} className="drop-shadow-lg" />}
         </button>
 
-        {/* Audio Track Record Icon */}
+        {/* Spinning disc */}
         <div
-          className="w-8 h-8 rounded-md border-[2px] border-white/80 bg-neutral-800 flex items-center justify-center overflow-hidden spin-disc mt-2"
+          className="w-9 h-9 rounded-full border-[2.5px] border-white/80 bg-neutral-800 flex items-center justify-center spin-disc mt-1"
           style={{ animationPlayState: isPlaying ? "running" : "paused" }}
         >
-          <span className="text-white text-[10px] font-bold">{initials}</span>
+          <span className="text-white text-[11px] font-bold">{initials}</span>
         </div>
       </div>
 
-      {/* ── BOTTOM LEFT (Instagram Reels Style) ─────────────────────────── */}
+      {/* ── Bottom left ───────────────────────────────────────────────────── */}
       <div
-        className="absolute left-0 right-16 pl-3 pr-2 z-20 pointer-events-none flex flex-col gap-2.5"
+        className="absolute left-0 right-16 pl-4 z-20 flex flex-col gap-2"
         style={{ bottom: `${CONTENT_BOTTOM}px` }}
       >
-        {/* Author row */}
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-full border border-white/20 flex items-center justify-center text-white font-bold text-xs bg-gradient-to-tr from-purple-500 to-pink-500 shadow-md">
+        <div className="flex items-center gap-2 pointer-events-auto">
+          <div className="w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-[13px] bg-gradient-to-tr from-purple-500 to-pink-500 border border-white/20">
             {initials}
           </div>
-          <span className="text-white font-semibold text-[14px] drop-shadow-md">
+          <span className="text-white font-semibold text-[15px] drop-shadow-lg">
             {video.author}
           </span>
-          <div className="w-1 h-1 rounded-full bg-white/70 mx-0.5" />
-          <button className="text-white font-semibold text-[14px] drop-shadow-md border border-white/30 rounded-md px-2 py-0.5 backdrop-blur-sm pointer-events-auto">
+          <span className="text-white/60 text-xs">·</span>
+          <button
+            className="text-white text-[13px] font-semibold border border-white/50 rounded px-2 py-0.5"
+            onClick={e => e.stopPropagation()}
+          >
             Follow
           </button>
         </div>
 
-        {/* Caption */}
         {video.caption && (
-          <p className="text-white text-[14px] leading-snug drop-shadow-md line-clamp-2">
+          <p
+            className="text-white text-[14px] leading-snug line-clamp-2 pointer-events-none"
+            style={{ textShadow: "0 1px 4px rgba(0,0,0,0.8)" }}
+          >
             {video.caption}
           </p>
         )}
 
-        {/* Audio Track */}
-        <div className="flex items-center gap-2 mt-0.5 bg-black/20 self-start px-2.5 py-1 rounded-full backdrop-blur-sm">
-          <Music size={12} className="text-white" />
-          <div className="overflow-hidden max-w-[120px]">
-            <span className="text-white text-[12px] whitespace-nowrap inline-block marquee-text">
-              {audioLabel} · {video.author}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{audioLabel} · {video.author}
+        <div className="flex items-center gap-1.5 pointer-events-none">
+          <Music size={12} className="text-white shrink-0" />
+          <div className="overflow-hidden max-w-[180px]">
+            <span className="text-white/80 text-[12px] whitespace-nowrap inline-block marquee-text">
+              Original audio · @{video.author}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Original audio · @{video.author}
             </span>
           </div>
         </div>
       </div>
 
-      {/* Progress Bar */}
+      {/* Progress bar */}
       <div
-        className="absolute left-0 right-0 h-[2px] bg-white/20 z-30 pointer-events-none"
+        className="absolute left-0 right-0 h-[2px] bg-white/15 z-30 pointer-events-none"
         style={{ bottom: `${NAV_H}px` }}
       >
-        <div className="h-full bg-white transition-none" style={{ width: `${progress * 100}%` }} />
+        <div className="h-full bg-white" style={{ width: `${progress * 100}%`, transition: "none" }} />
       </div>
     </div>
   );
