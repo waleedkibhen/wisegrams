@@ -1,23 +1,26 @@
-import type { Metadata } from "next";
+"use client";
+
+import { useState, useCallback } from "react";
 import BottomNav from "@/components/BottomNav";
 import VideoFeed from "@/components/VideoFeed";
 import FeedHeader from "@/components/FeedHeader";
 
-export const metadata: Metadata = {
-  title: "Feed — Wisegrams",
-  description: "Your personalised short-form video feed on Wisegrams.",
-};
-
 export default function FeedPage() {
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const handleSearch = useCallback((q: string) => {
+    setSearchQuery(q);
+  }, []);
+
   return (
     <main className="relative w-full bg-black" style={{ height: "100dvh" }}>
-      {/* Full-screen snap-scroll feed — extends behind the fixed header + nav */}
-      <VideoFeed />
+      {/* Full-screen snap-scroll feed */}
+      <VideoFeed searchQuery={searchQuery} />
 
-      {/* Instagram-style floating header (like "Reels" at top-left) */}
-      <FeedHeader />
+      {/* Floating header with search */}
+      <FeedHeader onSearch={handleSearch} />
 
-      {/* Floating bottom nav — overlays on top of video */}
+      {/* Floating bottom nav */}
       <BottomNav />
     </main>
   );

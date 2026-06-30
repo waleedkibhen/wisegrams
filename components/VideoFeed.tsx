@@ -1,84 +1,213 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  useCallback,
+  useMemo,
+  useTransition,
+} from "react";
 import VideoCard from "@/components/VideoCard";
 import { useVideoStore } from "@/hooks/useVideoStore";
 import { Play } from "lucide-react";
 
-export default function VideoFeed() {
-  const { videos, toggleLike } = useVideoStore();
+// Minimum videos buffered ahead before we append the next batch
+const PREFETCH_THRESHOLD = 3;
+
+// ── Skeleton loader shown while the initial DB fetch is in-flight ─────────────
+function FeedSkeleton() {
+  return (
+    <div className="flex flex-col items-center justify-center h-dvh text-center px-8 gap-6">
+      <div className="flex flex-col items-center gap-4">
+        {/* Pulsing logo placeholder */}
+        <div
+          className="w-16 h-16 rounded-2xl animate-pulse"
+          style={{
+            background:
+              "linear-gradient(135deg, rgba(124,58,237,0.4) 0%, rgba(168,85,247,0.2) 100%)",
+          }}
+        />
+        <div className="flex flex-col gap-2 items-center">
+          <div className="w-32 h-3 rounded-full bg-white/10 animate-pulse" />
+          <div className="w-24 h-2.5 rounded-full bg-white/6 animate-pulse" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Empty state ───────────────────────────────────────────────────────────────
+function EmptyFeed() {
+  return (
+    <div className="flex flex-col items-center justify-center h-dvh text-center px-8 gap-6">
+      <div
+        className="w-20 h-20 rounded-2xl flex items-center justify-center"
+        style={{
+          background:
+            "linear-gradient(135deg, rgba(124,58,237,0.25) 0%, rgba(168,85,247,0.1) 100%)",
+          border: "1px solid rgba(124,58,237,0.2)",
+        }}
+      >
+        <Play size={32} className="text-purple-400 ml-1" />
+      </div>
+      <div className="flex flex-col gap-2">
+        <h2 className="text-white font-bold text-xl tracking-tight">
+          No videos yet
+        </h2>
+        <p className="text-neutral-500 text-sm leading-relaxed max-w-[240px]">
+          Tap <strong className="text-purple-400">+</strong> below to add your
+          first Google Drive video.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ── Search empty state ────────────────────────────────────────────────────────
+function SearchEmpty({ query }: { query: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center h-dvh text-center px-8 gap-5">
+      <p className="text-neutral-400 text-sm">
+        No videos matching{" "}
+        <span className="text-white font-semibold">"{query}"</span>
+      </p>
+    </div>
+  );
+}
+
+interface VideoFeedProps {
+  searchQuery?: string;
+}
+
+export default function VideoFeed({ searchQuery = "" }: VideoFeedProps) {
+  const { videos, toggleLike, isInitializing } = useVideoStore();
   const [activeIndex, setActiveIndex] = useState(0);
-  
-  // To support infinite loop, we store an array of instances referencing video IDs.
-  // Each instance gets a unique key so React can render duplicates of the same video.
+
+  // Feed items support infinite scroll: each entry has a unique key + video id
   const [feedItems, setFeedItems] = useState<{ id: string; key: string }[]>([]);
+
+  // Search results from the API (null = not in search mode)
+  const [searchResults, setSearchResults] = useState<typeof videos | null>(null);
+  const [_isPending, startTransition] = useTransition();
 
   const containerRef = useRef<HTMLDivElement>(null);
   const programmaticScroll = useRef(false);
+  const observerRef = useRef<IntersectionObserver | null>(null);
+  const observedItems = useRef<Set<Element>>(new Set());
 
-  // ── Sync feedItems with available videos ─────────────────────────────────────
+  // ── Live search via API ───────────────────────────────────────────────────
   useEffect(() => {
-    if (videos.length === 0) {
-      setFeedItems([]);
+    if (!searchQuery.trim()) {
+      setSearchResults(null);
       return;
     }
-
-    setFeedItems((prev) => {
-      // If empty, initialize with the current videos in order
-      if (prev.length === 0) {
-        return videos.map((v, i) => ({ id: v.id, key: `${v.id}-init-${i}` }));
+    const controller = new AbortController();
+    const debounce = setTimeout(async () => {
+      try {
+        const res = await fetch(
+          `/api/videos/search?q=${encodeURIComponent(searchQuery.trim())}`,
+          { signal: controller.signal }
+        );
+        if (res.ok) {
+          const data = await res.json();
+          startTransition(() => setSearchResults(data.videos));
+        }
+      } catch {
+        // Aborted or failed — ignore
       }
-      // If not empty, just filter out any videos that were deleted
-      const validIds = new Set(videos.map(v => v.id));
-      return prev.filter(item => validIds.has(item.id));
-    });
-  }, [videos]);
+    }, 220);
+    return () => {
+      clearTimeout(debounce);
+      controller.abort();
+    };
+  }, [searchQuery]);
 
-  // ── Infinite scroll logic: append randomly shuffled videos when near the end ──
+  // ── Source videos: full list or search results ────────────────────────────
+  const sourceVideos = searchResults !== null ? searchResults : videos;
+
+  // ── Sync feedItems when sourceVideos changes ──────────────────────────────
   useEffect(() => {
-    if (videos.length === 0 || feedItems.length === 0) return;
-
-    // If the user scrolls within 3 items of the end, append another batch
-    if (activeIndex >= feedItems.length - 3) {
-      const shuffled = [...videos].sort(() => Math.random() - 0.5);
-      const newItems = shuffled.map((v, i) => ({
-        id: v.id,
-        key: `${v.id}-${Date.now()}-${i}`,
-      }));
-      setFeedItems((prev) => [...prev, ...newItems]);
+    if (sourceVideos.length === 0) {
+      setFeedItems([]);
+      setActiveIndex(0);
+      return;
     }
-  }, [activeIndex, videos, feedItems.length]);
+    setFeedItems((prev) => {
+      if (prev.length === 0) {
+        return sourceVideos.map((v, i) => ({
+          id: v.id,
+          key: `${v.id}-init-${i}`,
+        }));
+      }
+      // Filter out deleted/unavailable videos
+      const validIds = new Set(sourceVideos.map((v) => v.id));
+      const filtered = prev.filter((item) => validIds.has(item.id));
+      // If all gone (e.g. search changed completely), reset
+      if (filtered.length === 0) {
+        return sourceVideos.map((v, i) => ({
+          id: v.id,
+          key: `${v.id}-init-${i}`,
+        }));
+      }
+      return filtered;
+    });
+  }, [sourceVideos]);
 
-  // ── IntersectionObserver: set active index when a card is ≥ 55% visible ──────
+  // ── Infinite scroll: append batch when near the end ──────────────────────
+  useEffect(() => {
+    // Only infinite-scroll in non-search mode and with >1 video
+    if (searchQuery.trim() || sourceVideos.length <= 1) return;
+    if (feedItems.length === 0) return;
+    if (activeIndex < feedItems.length - PREFETCH_THRESHOLD) return;
+
+    const shuffled = [...sourceVideos].sort(() => Math.random() - 0.5);
+    const newItems = shuffled.map((v, i) => ({
+      id: v.id,
+      key: `${v.id}-${Date.now()}-${i}`,
+    }));
+    setFeedItems((prev) => [...prev, ...newItems]);
+  }, [activeIndex, sourceVideos, feedItems.length, searchQuery]);
+
+  // ── Observe a single element ──────────────────────────────────────────────
+  const observeElement = useCallback((el: HTMLElement) => {
+    if (!observerRef.current || observedItems.current.has(el)) return;
+    observerRef.current.observe(el);
+    observedItems.current.add(el);
+  }, []);
+
+  // ── IntersectionObserver setup ────────────────────────────────────────────
   useEffect(() => {
     const container = containerRef.current;
-    if (!container || feedItems.length === 0) return;
+    if (!container) return;
 
-    const observer = new IntersectionObserver(
+    observerRef.current = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
           if (entry.isIntersecting && entry.intersectionRatio >= 0.55) {
-            const idx = Number((entry.target as HTMLElement).dataset.index);
-            setActiveIndex(idx);
+            const idx = Number(
+              (entry.target as HTMLElement).dataset.index
+            );
+            if (!isNaN(idx)) setActiveIndex(idx);
           }
         }
       },
       { root: container, threshold: 0.55 }
     );
 
-    // Give React a tick to render the feed items before observing
-    const timeout = setTimeout(() => {
-      const items = container.querySelectorAll<HTMLElement>("[data-feed-item]");
-      items.forEach((el) => observer.observe(el));
-    }, 50);
+    // Observe all currently-rendered items
+    const items = container.querySelectorAll<HTMLElement>("[data-feed-item]");
+    items.forEach((el) => observeElement(el));
 
     return () => {
-      clearTimeout(timeout);
-      observer.disconnect();
+      observerRef.current?.disconnect();
+      observerRef.current = null;
+      observedItems.current.clear();
     };
-  }, [feedItems.length]); // Re-observe when items are appended
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Only set up once; new items are observed via observeElement callback
 
-  // ── Keyboard nav (desktop) ───────────────────────────────────────────────────
+  // ── Keyboard nav (desktop) ────────────────────────────────────────────────
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "ArrowDown") {
@@ -91,44 +220,42 @@ export default function VideoFeed() {
     return () => window.removeEventListener("keydown", onKey);
   }, [feedItems.length]);
 
-  // ── Programmatic scroll when activeIndex changes via keyboard ─────────────────
+  // ── Programmatic scroll on keyboard nav ──────────────────────────────────
   useEffect(() => {
     const container = containerRef.current;
     if (!container || programmaticScroll.current) return;
-    const item = container.querySelector<HTMLElement>(`[data-index="${activeIndex}"]`);
+    const item = container.querySelector<HTMLElement>(
+      `[data-index="${activeIndex}"]`
+    );
     if (item) {
       programmaticScroll.current = true;
-      item.scrollIntoView({ behavior: "smooth" });
-      setTimeout(() => { programmaticScroll.current = false; }, 500);
+      requestAnimationFrame(() => {
+        item.scrollIntoView({ behavior: "smooth" });
+        setTimeout(() => {
+          programmaticScroll.current = false;
+        }, 600);
+      });
     }
   }, [activeIndex]);
 
-  const handleScroll = useCallback(() => {
-    // Nothing needed — IntersectionObserver handles active index detection
-  }, []);
-
-  // Map the feedItems back to actual video objects for rendering
+  // Map feedItems → actual video objects
   const renderedVideos = useMemo(() => {
-    const videoMap = new Map(videos.map(v => [v.id, v]));
+    const videoMap = new Map(sourceVideos.map((v) => [v.id, v]));
     return feedItems
-      .map(item => ({ key: item.key, video: videoMap.get(item.id) }))
-      .filter((item): item is { key: string; video: NonNullable<typeof item.video> } => !!item.video);
-  }, [feedItems, videos]);
+      .map((item) => ({ key: item.key, video: videoMap.get(item.id) }))
+      .filter(
+        (
+          item
+        ): item is { key: string; video: NonNullable<typeof item.video> } =>
+          !!item.video
+      );
+  }, [feedItems, sourceVideos]);
 
-  if (videos.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center h-dvh text-center px-8 gap-5">
-        <div className="w-20 h-20 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center">
-          <Play size={32} className="text-neutral-400 ml-1" />
-        </div>
-        <div>
-          <h2 className="text-white font-bold text-xl mb-2">No videos yet</h2>
-          <p className="text-neutral-500 text-sm leading-relaxed">
-            Tap <strong className="text-white">+</strong> below to add your first Google Drive video.
-          </p>
-        </div>
-      </div>
-    );
+  // ── Render states ─────────────────────────────────────────────────────────
+  if (isInitializing) return <FeedSkeleton />;
+  if (videos.length === 0) return <EmptyFeed />;
+  if (searchQuery.trim() && searchResults !== null && searchResults.length === 0) {
+    return <SearchEmpty query={searchQuery} />;
   }
 
   return (
@@ -136,7 +263,6 @@ export default function VideoFeed() {
       ref={containerRef}
       className="feed-container w-full"
       style={{ height: "100dvh" }}
-      onScroll={handleScroll}
     >
       {renderedVideos.map(({ key, video }, index) => (
         <div
@@ -144,6 +270,9 @@ export default function VideoFeed() {
           data-feed-item
           data-index={index}
           className="feed-item"
+          ref={(el) => {
+            if (el) observeElement(el);
+          }}
         >
           <VideoCard
             video={video}

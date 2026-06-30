@@ -23,6 +23,10 @@
   --foreground: #ffffff;
   --muted: #737373;
   --font-inter: "Inter", sans-serif;
+
+  /* Nav geometry — single source of truth */
+  --nav-height: 64px;
+  --nav-offset: 76px; /* nav-height + 12px breathing room */
 }
 
 /* ─── Base Reset ──────────────────────────────────────────────────────────── */
@@ -82,13 +86,12 @@ body {
   overflow: hidden;
 }
 
-/* ─── Instagram-style Bottom Nav — frosted glass overlay ─────────────────── */
+/* ─── Bottom Nav — frosted glass overlay ─────────────────────────────────── */
 .ig-nav {
-  /* Semi-transparent so video bleeds through, exactly like Instagram Reels */
   background: rgba(0, 0, 0, 0.72);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 /* ─── Animations ──────────────────────────────────────────────────────────── */
@@ -131,6 +134,13 @@ body {
 }
 .fade-in { animation: fade-in 0.2s ease-out forwards; }
 
+/* Search bar expand */
+@keyframes search-expand {
+  from { width: 0; opacity: 0; }
+  to   { width: 100%; opacity: 1; }
+}
+.search-expand { animation: search-expand 0.25s cubic-bezier(0.4, 0, 0.2, 1) forwards; }
+
 /* Marquee scroll for long audio titles */
 @keyframes marquee {
   0%   { transform: translateX(0); }
@@ -166,4 +176,23 @@ button { cursor: pointer; border: none; background: none; font-family: inherit; 
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border-top: 1px solid rgba(255,255,255,0.06);
+}
+
+/* ─── Search input inside header ──────────────────────────────────────────── */
+.search-input {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 24px;
+  outline: none;
+  font-family: inherit;
+  transition: border-color 0.2s, background 0.2s;
+}
+.search-input::placeholder {
+  color: rgba(255, 255, 255, 0.45);
+}
+.search-input:focus {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.35);
+  box-shadow: none;
 }
