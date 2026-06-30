@@ -73,6 +73,7 @@ export async function GET(request: NextRequest) {
       const res = await fetch(url, {
         headers: fetchHeaders,
         redirect: "follow",
+        signal: request.signal, // Abort upstream if client disconnects
       });
       contentType = res.headers.get("content-type") ?? "";
       if (!contentType.includes("text/html")) {
