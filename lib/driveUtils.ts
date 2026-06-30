@@ -40,14 +40,24 @@ export function extractDriveFileId(url: string): string | null {
 }
 
 /**
- * Returns our own proxy URL for a Drive file.
- * This is the primary URL used for video playback — enables native <video>
- * with full preloading, seeking, and browser caching.
+ * Returns the official Google Drive API URL for a file.
+ * This connects directly to Google's infrastructure, bypassing our Vercel proxy
+ * to ensure flawless streaming without rate limits.
+ * Requires NEXT_PUBLIC_GOOGLE_DRIVE_API_KEY to be set in the environment.
  */
-export function getDriveProxyUrl(shareUrl: string): string | null {
+export function getDriveApiUrl(shareUrl: string): string | null {
   const fileId = extractDriveFileId(shareUrl);
   if (!fileId) return null;
-  return `/api/proxy?id=${fileId}`;
+  
+  // For backwards compatibility during transition, if no API key is found,
+  // fallback to the old proxy route.
+  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_DRIVE_API_KEY;
+  if (!apiKey) {
+    console.warn("NEXT_PUBLIC_GOOGLE_DRIVE_API_KEY is missing. Falling back to proxy.");
+    return `/api/proxy?id=${fileId}`;
+  }
+
+  return `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&key=${apiKey}`;
 }
 
 /**

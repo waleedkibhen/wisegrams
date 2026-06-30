@@ -9,7 +9,7 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import type { VideoPost, UserProfile } from "@/lib/storage";
-import { getDriveProxyUrl, getDriveThumbnailUrl } from "@/lib/driveUtils";
+import { getDriveApiUrl, getDriveThumbnailUrl } from "@/lib/driveUtils";
 
 // ─── Store Types ───────────────────────────────────────────────────────────────
 
@@ -51,7 +51,15 @@ export const useVideoStore = create<VideoStore>()(
           const res = await fetch("/api/videos");
           if (res.ok) {
             const data = await res.json();
-            set({ videos: data.videos, isInitializing: false });
+            // Dynamically upgrade any old proxy URLs to the new native API URL
+            // on the fly so we don't have to rewrite the database.
+            const upgradedVideos = data.videos.map((v: VideoPost) => {
+              if (v.streamUrl.includes("/api/proxy") && v.driveShareUrl) {
+                return { ...v, streamUrl: getDriveApiUrl(v.driveShareUrl) ?? v.streamUrl };
+              }
+              return v;
+            });
+            set({ videos: upgradedVideos, isInitializing: false });
           }
         } catch (e) {
           console.error("Failed to init videos", e);
@@ -60,14 +68,14 @@ export const useVideoStore = create<VideoStore>()(
       },
 
       addVideo: async (shareUrl, caption) => {
-        const proxyUrl = getDriveProxyUrl(shareUrl);
+        const streamUrl = getDriveApiUrl(shareUrl);
         const thumbnailUrl = getDriveThumbnailUrl(shareUrl);
-        if (!proxyUrl) return;
+        if (!streamUrl) return;
 
         const newVideo: VideoPost = {
           id: `video-${Date.now()}`,
           driveShareUrl: shareUrl,
-          streamUrl: proxyUrl,
+          streamUrl,
           thumbnailUrl: thumbnailUrl ?? "",
           caption,
           author: get().profile.username,
