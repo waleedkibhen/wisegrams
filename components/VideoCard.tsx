@@ -41,6 +41,11 @@ export default function VideoCard({
   onLike,
 }: VideoCardProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  // Track which URL is currently loaded to avoid the absolute-vs-relative URL
+  // comparison bug: el.src is always absolute (https://host/api/proxy?id=x)
+  // but video.streamUrl is relative (/api/proxy?id=x). They never match via
+  // string comparison, causing el.load() to fire on every effect run.
+  const loadedSrcRef = useRef<string>("");
   const isMountedRef = useRef(true);
 
   const [isPlaying, setIsPlaying] = useState(false);
@@ -67,9 +72,11 @@ export default function VideoCard({
     if (!el) return;
 
     if (shouldHaveSrc) {
-      // Set src if not already set to this URL
-      if (el.src !== video.streamUrl && el.getAttribute("data-src") !== video.streamUrl) {
-        el.setAttribute("data-src", video.streamUrl);
+      // Only set src + load() when it's actually a different video.
+      // We use a ref instead of comparing el.src (which is always absolute)
+      // to video.streamUrl (which is relative) — they'd never match.
+      if (loadedSrcRef.current !== video.streamUrl) {
+        loadedSrcRef.current = video.streamUrl;
         el.src = video.streamUrl;
         el.load();
       }
@@ -90,14 +97,14 @@ export default function VideoCard({
         el.pause();
       }
     } else {
-      // ── Release media pipeline: free the network connection and hardware decoder ──
-      // On iOS Safari/Chrome, NOT doing this causes all subsequent videos to
-      // stall indefinitely because the browser runs out of media connections.
-      if (el.src) {
+      // ── Release media pipeline ────────────────────────────────────────────────
+      // Only release if there's actually something loaded. Setting src="" and
+      // calling load() flushes the hardware decoder slot on iOS Safari.
+      if (loadedSrcRef.current !== "") {
+        loadedSrcRef.current = "";
         el.pause();
         el.src = "";
-        el.removeAttribute("data-src");
-        el.load(); // Flushes the media buffer & releases the connection slot
+        el.load();
       }
     }
   }, [isActive, shouldHaveSrc, video.streamUrl]); // eslint-disable-line react-hooks/exhaustive-deps
