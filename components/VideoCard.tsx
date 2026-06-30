@@ -72,12 +72,18 @@ export default function VideoCard({
     if (!el) return;
 
     if (shouldHaveSrc) {
+      // Bypass the proxy to avoid Vercel rate limits and static generation bugs.
+      // Fetch directly from Google Drive.
+      let directUrl = video.streamUrl;
+      if (directUrl.includes("/api/proxy?id=")) {
+        const fileId = directUrl.split("id=")[1];
+        directUrl = `https://drive.google.com/uc?export=download&id=${fileId}&confirm=t`;
+      }
+
       // Only set src + load() when it's actually a different video.
-      // We use a ref instead of comparing el.src (which is always absolute)
-      // to video.streamUrl (which is relative) — they'd never match.
-      if (loadedSrcRef.current !== video.streamUrl) {
-        loadedSrcRef.current = video.streamUrl;
-        el.src = video.streamUrl;
+      if (loadedSrcRef.current !== directUrl) {
+        loadedSrcRef.current = directUrl;
+        el.src = directUrl;
         el.load();
       }
 
@@ -120,7 +126,12 @@ export default function VideoCard({
       if (!document.hidden && el.paused) {
         // Re-attach src if it was cleared (can happen on some mobile browsers)
         if (!el.src || el.src === window.location.href) {
-          el.src = video.streamUrl;
+          let directUrl = video.streamUrl;
+          if (directUrl.includes("/api/proxy?id=")) {
+            const fileId = directUrl.split("id=")[1];
+            directUrl = `https://drive.google.com/uc?export=download&id=${fileId}&confirm=t`;
+          }
+          el.src = directUrl;
           el.load();
         }
         el.play().catch(() => {});

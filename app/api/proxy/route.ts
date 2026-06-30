@@ -30,9 +30,8 @@
 
 import type { NextRequest } from "next/server";
 
-// DO NOT add `export const dynamic = "force-dynamic"` here.
-// Removing it allows Vercel's CDN to cache responses using s-maxage,
-// which is essential for multi-user performance.
+// Restore force-dynamic to prevent Next.js from statically generating a 400 error.
+export const dynamic = "force-dynamic";
 
 // Use Node.js runtime for full streaming / ReadableStream pipe support
 export const runtime = "nodejs";
