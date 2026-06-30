@@ -61,15 +61,51 @@ export default function VideoCard({
     const el = videoRef.current;
     if (!el) return;
 
-    if (isActive) {
-      setIsLoaded(false);
-      setHasError(false);
-      setProgress(0);
-      el.currentTime = 0;
-      el.play().catch(() => {});
+    if (shouldMount) {
+      // If the source isn't set, set it and load
+      if (el.getAttribute("src") !== video.streamUrl) {
+        el.setAttribute("src", video.streamUrl);
+        el.load();
+      }
+      
+      if (isActive) {
+        setIsLoaded(false);
+        setHasError(false);
+        setProgress(0);
+        el.currentTime = 0;
+        el.preload = "auto";
+        // Simple fire-and-forget
+        el.play().catch(() => {});
+      } else {
+        el.pause();
+        el.preload = "metadata";
+      }
     } else {
+      // CRITICAL FIX: Properly destroy the video stream to release browser connections and memory.
+      // If we don't do this, mobile browsers (iOS Safari/Chrome) will hit their connection limit 
+      // (usually 6) with dangling requests and all new videos will stall on the first frame forever.
       el.pause();
+      el.removeAttribute("src");
+      el.load();
     }
+  }, [isActive, shouldMount, video.streamUrl]);
+
+  // Gracefully handle OS backgrounding (app switching)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      const el = videoRef.current;
+      if (!el || !isActive) return;
+      
+      if (document.hidden) {
+        el.pause();
+      } else {
+        // Resume playback when returning to the app
+        el.play().catch(() => {});
+      }
+    };
+    
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, [isActive]);
 
   useEffect(() => {
@@ -157,22 +193,18 @@ export default function VideoCard({
       onClick={handleTap}
     >
       {/* Video */}
-      {shouldMount && (
-        <video
-          ref={videoRef}
-          src={video.streamUrl}
-          className="absolute inset-0 w-full h-full object-contain bg-black"
-          loop
-          muted
-          playsInline
-          preload={isActive ? "auto" : "metadata"}
-          onCanPlay={onCanPlay}
-          onPlay={onPlay}
-          onPause={onPause}
-          onTimeUpdate={onTimeUpdate}
-          onError={onError}
-        />
-      )}
+      <video
+        ref={videoRef}
+        className="absolute inset-0 w-full h-full object-contain bg-black"
+        loop
+        muted
+        playsInline
+        onCanPlay={onCanPlay}
+        onPlay={onPlay}
+        onPause={onPause}
+        onTimeUpdate={onTimeUpdate}
+        onError={onError}
+      />
 
       {/* Play/Pause indicator */}
       {playIconState && (
