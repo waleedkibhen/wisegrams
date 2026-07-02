@@ -15,18 +15,17 @@ import {
   VolumeX,
   Volume2,
   Music,
+  MoreHorizontal,
 } from "lucide-react";
 import type { VideoPost } from "@/lib/storage";
 
-const NAV_H = 50;
-const CONTENT_BOTTOM = NAV_H + 16;
-
-// iOS Safari hard limit on concurrent media connections is 4.
-// Keeping only 1 lookahead means max 2 connections at any time:
-// the active video and the next one. This prevents the "stuck on
-// first frame after returning to the app" bug entirely.
-const LOOKAHEAD = 1;
-
+// ─────────────────────────────────────────────────────────────────────────────
+// We strictly limit loaded videos to the current one and the next one.
+// Browsers strictly limit concurrent media connections to the same domain.
+// Loading 3 videos (previous, current, next) exhausts this limit in Chrome,
+// causing subsequent videos (e.g., video 3) to stall in the network queue
+// and permanently appear blank.
+// ─────────────────────────────────────────────────────────────────────────────
 interface VideoCardProps {
   video: VideoPost;
   index: number;
@@ -40,117 +39,103 @@ export default function VideoCard({
   activeIndex,
   onLike,
 }: VideoCardProps) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  // Track which URL is currently loaded to avoid the absolute-vs-relative URL
-  // comparison bug: el.src is always absolute (https://host/api/proxy?id=x)
-  // but video.streamUrl is relative (/api/proxy?id=x). They never match via
-  // string comparison, causing el.load() to fire on every effect run.
-  const loadedSrcRef = useRef<string>("");
-  const isMountedRef = useRef(true);
+  const videoRef   = useRef<HTMLVideoElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);     // outer div — observed by IntersectionObserver
+  const loadedSrcRef   = useRef<string>("");            // tracks which URL is actually loaded
+  const isMountedRef   = useRef(true);
+  // pendingPlay: set to true when the IntersectionObserver fires (video is visible)
+  // but el.src wasn't loaded yet. Effect 1 checks this flag when it sets src
+  // and calls play() immediately so the video isn't stuck blank.
+  const pendingPlay = useRef(false);
 
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [isMuted, setIsMuted] = useState(true);
-  const [progress, setProgress] = useState(0);
-  const [isLoaded, setIsLoaded] = useState(false);
-  const [hasError, setHasError] = useState(false);
-  const [showHeart, setShowHeart] = useState(false);
-  const [playIconState, setPlayIconState] = useState<"play" | "pause" | null>(null);
-  const [showMuteToast, setShowMuteToast] = useState(false);
+  const [isPlaying,    setIsPlaying]    = useState(false);
+  const [isMuted,      setIsMuted]      = useState(true);
+  const [progress,     setProgress]     = useState(0);
+  const [isLoaded,     setIsLoaded]     = useState(false);
+  const [hasError,     setHasError]     = useState(false);
+  const [showHeart,    setShowHeart]    = useState(false);
+  const [playIconState,setPlayIconState]= useState<"play" | "pause" | null>(null);
+  const [showMuteToast,setShowMuteToast]= useState(false);
 
-  const isActive = index === activeIndex;
-  // For iframes, we only render them when active or 1 away to save memory.
-  const shouldHaveSrc = isActive || index === activeIndex + LOOKAHEAD;
+  const isActive    = index === activeIndex;
   
-  const isIframe = video.streamUrl.includes("drive.google.com");
+  // Strictly load ONLY the active video and the NEXT video.
+  const shouldHaveSrc = index === activeIndex || index === activeIndex + 1;
 
   useEffect(() => {
     isMountedRef.current = true;
     return () => { isMountedRef.current = false; };
   }, []);
 
-  // ── Core media management ────────────────────────────────────────────────
+  // ── Effect 1: Auto-play and state reset when video mounts ───────────────
   useEffect(() => {
     const el = videoRef.current;
     if (!el) return;
 
-    if (shouldHaveSrc) {
-      // Only set src + load() when it's actually a different video.
-      // We use a ref instead of comparing el.src (which is always absolute)
-      // to video.streamUrl (which is relative) — they'd never match.
-      if (loadedSrcRef.current !== video.streamUrl) {
-        loadedSrcRef.current = video.streamUrl;
-        el.src = video.streamUrl;
-        el.load();
-      }
-
-      if (isActive) {
-        el.preload = "auto";
-        el.currentTime = 0;
-        if (isMountedRef.current) {
-          setIsLoaded(false);
-          setHasError(false);
-          setProgress(0);
-        }
-        el.play().catch(() => {
-          // Autoplay blocked — this is fine, user can tap to play
-        });
-      } else {
-        el.preload = "metadata";
-        el.pause();
-      }
-    } else {
-      // ── Release media pipeline ────────────────────────────────────────────────
-      // Only release if there's actually something loaded. Setting src="" and
-      // calling load() flushes the hardware decoder slot on iOS Safari.
-      if (loadedSrcRef.current !== "") {
-        loadedSrcRef.current = "";
-        el.pause();
-        el.removeAttribute("src");
-        el.load();
-      }
+    if (pendingPlay.current) {
+      el.play().catch(() => {});
     }
-  }, [isActive, shouldHaveSrc, video.streamUrl]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [shouldHaveSrc, isActive]);
 
-  // ── Recover playback when app returns from background ────────────────────
+  // ── Effect 2: IntersectionObserver — owns all play/pause decisions ───────
   useEffect(() => {
-    if (!isActive) return;
+    const wrapper = wrapperRef.current;
+    if (!wrapper) return;
 
-    const handleVisibility = () => {
-      const el = videoRef.current;
-      if (!el || !isMountedRef.current) return;
-
-      if (!document.hidden && el.paused) {
-        // Re-attach src if it was cleared (can happen on some mobile browsers)
-        if (!el.src || el.src === window.location.href) {
-          el.src = video.streamUrl;
-          el.load();
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!isMountedRef.current) return;
+        
+        if (entry.isIntersecting && entry.intersectionRatio >= 0.75) {
+          pendingPlay.current = true;
+          if (videoRef.current) {
+            videoRef.current.play().catch(() => {});
+          }
+        } else {
+          pendingPlay.current = false;
+          if (videoRef.current) {
+            videoRef.current.pause();
+          }
         }
-        el.play().catch(() => {});
-      }
-    };
+      },
+      { threshold: 0.75 }
+    );
 
-    document.addEventListener("visibilitychange", handleVisibility);
-    return () => document.removeEventListener("visibilitychange", handleVisibility);
-  }, [isActive, video.streamUrl]);
+    observer.observe(wrapper);
+    return () => observer.disconnect();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Mute sync ─────────────────────────────────────────────────────────────
+  // ── Effect 3: Mute sync ───────────────────────────────────────────────────
   useEffect(() => {
     const el = videoRef.current;
     if (el) el.muted = isMuted;
   }, [isMuted]);
 
-  // ── Tap handler (single = play/pause, double = like) ─────────────────────
+  // ── Effect 4: Recover playback when app returns from background ───────────
+  useEffect(() => {
+    if (!isActive) return;
+    const handleVisibility = () => {
+      const el = videoRef.current;
+      if (!el || !isMountedRef.current || document.hidden) return;
+      if (el.paused && el.src) el.play().catch(() => {});
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, [isActive]);
+
+  // ── Tap: single = play/pause toggle, double = like ───────────────────────
   const tapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastTap = useRef(0);
+  const lastTap  = useRef(0);
 
   const handleTap = useCallback(() => {
     if (!isActive) return;
     const now = Date.now();
 
     if (now - lastTap.current < 280) {
+      // ── Double tap → like ──
       if (tapTimer.current) clearTimeout(tapTimer.current);
       tapTimer.current = null;
-      lastTap.current = 0;
+      lastTap.current  = 0;
       if (!video.liked) onLike(video.id);
       setShowHeart(true);
       setTimeout(() => { if (isMountedRef.current) setShowHeart(false); }, 900);
@@ -195,11 +180,17 @@ export default function VideoCard({
     });
   }, []);
 
-  const onCanPlay = useCallback(() => { if (isMountedRef.current) setIsLoaded(true); }, []);
-  const onPlay = useCallback(() => { if (isMountedRef.current) setIsPlaying(true); }, []);
-  const onPause = useCallback(() => { if (isMountedRef.current) setIsPlaying(false); }, []);
-  const onError = useCallback(() => { if (isMountedRef.current) setHasError(true); }, []);
-  const onTimeUpdate = useCallback((e: React.SyntheticEvent<HTMLVideoElement>) => {
+  const onCanPlay     = useCallback(() => { if (isMountedRef.current) setIsLoaded(true); }, []);
+  const onPlay        = useCallback(() => { if (isMountedRef.current) setIsPlaying(true); }, []);
+  const onPause       = useCallback(() => { if (isMountedRef.current) setIsPlaying(false); }, []);
+  const onPlaying     = useCallback(() => { 
+    if (isMountedRef.current) {
+      setIsPlaying(true);
+      setIsLoaded(true); // Backup in case onCanPlay missed it
+    }
+  }, []);
+  const onError       = useCallback(() => { if (isMountedRef.current) setHasError(true); }, []);
+  const onTimeUpdate  = useCallback((e: React.SyntheticEvent<HTMLVideoElement>) => {
     const el = e.currentTarget;
     if (el.duration && isMountedRef.current) setProgress(el.currentTime / el.duration);
   }, []);
@@ -208,74 +199,80 @@ export default function VideoCard({
 
   return (
     <div
+      ref={wrapperRef}
       className="relative w-full h-full overflow-hidden bg-black select-none"
     >
-      {/* ── Background color and tap target for non-iframe areas ── */}
+      {/* Full-screen tap target */}
       <div className="absolute inset-0 z-0" onClick={handleTap} />
 
-      {/* ── Media element (Video or Iframe) ── */}
-      {isIframe ? (
-        shouldHaveSrc && (
-          <iframe
-            src={video.streamUrl}
-            className="absolute inset-0 w-full h-full object-contain bg-black z-10 border-none pointer-events-auto"
-            allow="autoplay"
-            sandbox="allow-scripts allow-same-origin allow-presentation"
-          />
-        )
-      ) : (
+      {/* ── Native <video> — zero iframes, ever ── */}
+      {shouldHaveSrc && (
         <video
           ref={videoRef}
-          className="absolute inset-0 w-full h-full object-contain bg-black z-10 pointer-events-none"
+          className="absolute inset-0 w-full h-full z-10 pointer-events-none"
+          style={{ objectFit: "cover" }}
           loop
           muted
           playsInline
+          preload="auto"
+          src={video.streamUrl}
           onCanPlay={onCanPlay}
           onPlay={onPlay}
+          onPlaying={onPlaying}
           onPause={onPause}
           onTimeUpdate={onTimeUpdate}
           onError={onError}
         />
       )}
 
-      {/* Loading spinner */}
+      {/* Gradient scrim — keeps text readable against any video */}
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          zIndex: 15,
+          background:
+            "linear-gradient(to top, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.2) 35%, rgba(0,0,0,0) 60%)",
+        }}
+      />
+
+      {/* ── Loading spinner ── */}
       {isActive && !isLoaded && !hasError && (
         <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none">
           <div className="w-10 h-10 rounded-full border-[3px] border-white/20 border-t-white animate-spin" />
         </div>
       )}
 
-      {/* Error */}
+      {/* ── Error state ── */}
       {isActive && hasError && (
         <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none px-8">
           <div className="bg-black/80 p-5 rounded-2xl text-center">
             <p className="text-white text-sm leading-relaxed">
-              Could not load video. Make sure Drive sharing is set to&nbsp;
+              Could not load video. Make sure Google Drive sharing is set to{" "}
               <strong>"Anyone with the link"</strong>.
             </p>
           </div>
         </div>
       )}
 
-      {/* Play/pause flash */}
+      {/* ── Play/pause flash ── */}
       {playIconState && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-30">
           <div className="play-flash w-16 h-16 rounded-full bg-black/50 flex items-center justify-center">
             {playIconState === "play"
-              ? <Play size={30} className="text-white fill-white ml-1" />
+              ? <Play  size={30} className="text-white fill-white ml-1" />
               : <Pause size={30} className="text-white fill-white" />}
           </div>
         </div>
       )}
 
-      {/* Double-tap heart */}
+      {/* ── Double-tap heart ── */}
       {showHeart && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-30">
           <Heart className="heart-burst" size={96} fill="#FF3040" color="#FF3040" strokeWidth={0} />
         </div>
       )}
 
-      {/* Mute toast */}
+      {/* ── Mute toast ── */}
       {showMuteToast && (
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none z-40 fade-in">
           <div className="bg-black/70 rounded-full px-5 py-2.5 flex items-center gap-2.5">
@@ -289,43 +286,57 @@ export default function VideoCard({
         </div>
       )}
 
-      {/* ── Right sidebar ─────────────────────────────────────────────────── */}
+      {/* ── Progress bar — top of screen ── */}
+      <div className="absolute top-0 left-0 right-0 h-[2px] bg-white/20 z-30 pointer-events-none">
+        <div
+          className="h-full bg-white"
+          style={{ width: `${progress * 100}%`, transition: "none" }}
+        />
+      </div>
+
+      {/* ── Right sidebar ── */}
       <div
-        className="absolute right-3 flex flex-col items-center gap-6 z-20"
-        style={{ bottom: `${CONTENT_BOTTOM}px` }}
+        className="absolute right-3 flex flex-col items-center gap-5"
+        style={{ zIndex: 25, bottom: "100px" }}
       >
         {/* Like */}
-        <button className="flex flex-col items-center gap-1" onClick={handleLike}>
+        <button className="flex flex-col items-center gap-1" onClick={handleLike} aria-label="Like">
           <Heart
-            size={30}
+            size={28}
             color={video.liked ? "#FF3040" : "white"}
             fill={video.liked ? "#FF3040" : "none"}
             strokeWidth={2}
-            className="drop-shadow-lg"
+            style={{ filter: "drop-shadow(0 1px 3px rgba(0,0,0,0.6))" }}
           />
-          <span className="text-white text-[12px] font-semibold drop-shadow">{video.likes}</span>
+          <span className="text-white text-[11px] font-semibold" style={{ textShadow: "0 1px 3px rgba(0,0,0,0.8)" }}>
+            {video.likes > 0 ? video.likes : ""}
+          </span>
         </button>
 
         {/* Comment (visual only) */}
-        <button className="flex flex-col items-center gap-1" onClick={e => e.stopPropagation()}>
-          <MessageCircle size={30} color="white" strokeWidth={2} className="drop-shadow-lg scale-x-[-1]" />
-          <span className="text-white text-[12px] font-semibold drop-shadow">0</span>
+        <button className="flex flex-col items-center gap-1" onClick={e => e.stopPropagation()} aria-label="Comments">
+          <MessageCircle
+            size={28} color="white" strokeWidth={2}
+            className="scale-x-[-1]"
+            style={{ filter: "drop-shadow(0 1px 3px rgba(0,0,0,0.6))" }}
+          />
+          <span className="text-white text-[11px] font-semibold" style={{ textShadow: "0 1px 3px rgba(0,0,0,0.8)" }}>0</span>
         </button>
 
         {/* Share */}
-        <button className="flex flex-col items-center gap-1" onClick={handleShare}>
-          <Send size={28} color="white" strokeWidth={2} className="drop-shadow-lg" />
-          <span className="text-white text-[12px] font-semibold drop-shadow">Share</span>
+        <button className="flex flex-col items-center gap-1" onClick={handleShare} aria-label="Share">
+          <Send size={26} color="white" strokeWidth={2}
+            style={{ filter: "drop-shadow(0 1px 3px rgba(0,0,0,0.6))" }}
+          />
+          <span className="text-white text-[11px] font-semibold" style={{ textShadow: "0 1px 3px rgba(0,0,0,0.8)" }}>Share</span>
         </button>
 
-        {/* Mute (hidden for iframes since we can't control their volume) */}
-        {!isIframe && (
-          <button onClick={handleMuteToggle} className="mt-1 z-30">
-            {isMuted
-              ? <VolumeX size={26} color="white" strokeWidth={2} className="drop-shadow-lg" />
-              : <Volume2 size={26} color="white" strokeWidth={2} className="drop-shadow-lg" />}
-          </button>
-        )}
+        {/* More */}
+        <button className="flex flex-col items-center" onClick={e => e.stopPropagation()} aria-label="More options">
+          <MoreHorizontal size={26} color="white" strokeWidth={2}
+            style={{ filter: "drop-shadow(0 1px 3px rgba(0,0,0,0.6))" }}
+          />
+        </button>
 
         {/* Spinning disc */}
         <div
@@ -336,25 +347,35 @@ export default function VideoCard({
         </div>
       </div>
 
-      {/* ── Bottom left ───────────────────────────────────────────────────── */}
+      {/* ── Mute/unmute button — top right ── */}
+      <button
+        onClick={handleMuteToggle}
+        className="absolute top-14 right-4 z-30 w-9 h-9 rounded-full bg-black/40 flex items-center justify-center backdrop-blur-sm"
+        aria-label={isMuted ? "Unmute" : "Mute"}
+      >
+        {isMuted
+          ? <VolumeX size={18} color="white" strokeWidth={2} />
+          : <Volume2 size={18} color="white" strokeWidth={2} />}
+      </button>
+
+      {/* ── Bottom-left: username + caption + audio marquee ── */}
       <div
-        className="absolute left-0 right-16 pl-4 z-20 flex flex-col gap-2"
-        style={{ bottom: `${CONTENT_BOTTOM}px` }}
+        className="absolute left-0 right-16 pl-4 flex flex-col gap-2"
+        style={{ zIndex: 25, bottom: "28px" }}
       >
         <div className="flex items-center gap-2 pointer-events-auto">
-          <div className="w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-[13px] bg-gradient-to-tr from-purple-500 to-pink-500 border border-white/20">
+          <div
+            className="w-9 h-9 rounded-full flex items-center justify-center text-white font-bold text-[14px] shrink-0"
+            style={{ background: "linear-gradient(135deg, #833ab4 0%, #fd1d1d 50%, #fcb045 100%)" }}
+          >
             {initials}
           </div>
-          <span className="text-white font-semibold text-[15px] drop-shadow-lg">
-            {video.author}
-          </span>
-          <span className="text-white/60 text-xs">·</span>
-          <button
-            className="text-white text-[13px] font-semibold border border-white/50 rounded px-2 py-0.5"
-            onClick={e => e.stopPropagation()}
+          <span
+            className="text-white font-bold text-[15px]"
+            style={{ textShadow: "0 1px 4px rgba(0,0,0,0.8)" }}
           >
-            Follow
-          </button>
+            @{video.author}
+          </span>
         </div>
 
         {video.caption && (
@@ -368,23 +389,13 @@ export default function VideoCard({
 
         <div className="flex items-center gap-1.5 pointer-events-none">
           <Music size={12} className="text-white shrink-0" />
-          <div className="overflow-hidden max-w-[180px]">
+          <div className="overflow-hidden max-w-[200px]">
             <span className="text-white/80 text-[12px] whitespace-nowrap inline-block marquee-text">
               Original audio · @{video.author}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Original audio · @{video.author}
             </span>
           </div>
         </div>
       </div>
-
-      {/* Progress bar (hidden for iframes since we can't track progress) */}
-      {!isIframe && (
-        <div
-          className="absolute left-0 right-0 h-[2px] bg-white/15 z-30 pointer-events-none"
-          style={{ bottom: `${NAV_H}px` }}
-        >
-          <div className="h-full bg-white" style={{ width: `${progress * 100}%`, transition: "none" }} />
-        </div>
-      )}
     </div>
   );
 }

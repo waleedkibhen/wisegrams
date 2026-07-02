@@ -24,10 +24,11 @@
   --muted: #737373;
   --font-inter: "Inter", sans-serif;
 
-  /* Nav geometry — single source of truth */
-  --nav-height: 64px;
-  --nav-offset: 76px; /* nav-height + 12px breathing room */
 }
+
+/* z-index utility layers — explicit stacking for the Reels feed */
+.z-15 { z-index: 15; }
+.z-25 { z-index: 25; }
 
 /* ─── Base Reset ──────────────────────────────────────────────────────────── */
 *,
@@ -70,20 +71,29 @@ body {
 
 /* ─── Snap Scroll Feed ────────────────────────────────────────────────────── */
 .feed-container {
-  height: 100%;
+  /* True fullscreen — 100dvh accounts for mobile browser chrome */
+  height: 100dvh;
+  width: 100vw;
   overflow-y: scroll;
   scroll-snap-type: y mandatory;
   -webkit-overflow-scrolling: touch;
-  overscroll-behavior: contain;
+  overscroll-behavior-y: contain;
+  /* Hide scrollbar on all browsers */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
+.feed-container::-webkit-scrollbar { display: none; }
 
 .feed-item {
-  height: 100%;
+  /* Each reel = exactly one full screen */
+  height: 100dvh;
+  width: 100vw;
   scroll-snap-align: start;
   scroll-snap-stop: always;
   flex-shrink: 0;
   position: relative;
   overflow: hidden;
+  background: #000;
 }
 
 /* ─── Bottom Nav — frosted glass overlay ─────────────────────────────────── */

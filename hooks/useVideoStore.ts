@@ -9,7 +9,16 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import type { VideoPost, UserProfile } from "@/lib/storage";
-import { getDrivePreviewUrl, getDriveThumbnailUrl } from "@/lib/driveUtils";
+import { getDriveApiUrl, getDriveThumbnailUrl } from "@/lib/driveUtils";
+
+// getDriveApiUrl returns:
+//   - `https://www.googleapis.com/drive/v3/files/ID?alt=media&key=KEY`  when NEXT_PUBLIC_GOOGLE_DRIVE_API_KEY is set
+//     → browser streams DIRECTLY from Google (no proxy, no rate limiting, perfect Range support)
+//   - `/api/proxy?id=ID`  when the key is not set
+//     → falls back to server-side proxy with improved interstitial handling
+//
+// Set NEXT_PUBLIC_GOOGLE_DRIVE_API_KEY in .env.local or your Netlify env vars
+// to permanently fix the "video 2 stuck / video 3 blank" bug.
 
 // ─── Store Types ───────────────────────────────────────────────────────────────
 
@@ -51,11 +60,16 @@ export const useVideoStore = create<VideoStore>()(
           const res = await fetch("/api/videos");
           if (res.ok) {
             const data = await res.json();
-            // Dynamically upgrade any old URLs to the new native Preview URL
-            // on the fly so we don't have to rewrite the database.
+            // Always upgrade streamUrls to the best available format on load.
+            // If API key is set  → googleapis.com URL (browser-direct, no proxy).
+            // If no key         → /api/proxy URL (improved server proxy).
+            // This means adding the API key later instantly improves all videos.
             const upgradedVideos = data.videos.map((v: VideoPost) => {
-              if ((v.streamUrl.includes("/api/proxy") || v.streamUrl.includes("googleapis.com")) && v.driveShareUrl) {
-                return { ...v, streamUrl: getDrivePreviewUrl(v.driveShareUrl) ?? v.streamUrl };
+              if (v.driveShareUrl) {
+                const upgraded = getDriveApiUrl(v.driveShareUrl);
+                if (upgraded && upgraded !== v.streamUrl) {
+                  return { ...v, streamUrl: upgraded };
+                }
               }
               return v;
             });
@@ -68,7 +82,8 @@ export const useVideoStore = create<VideoStore>()(
       },
 
       addVideo: async (shareUrl, caption) => {
-        const streamUrl = getDrivePreviewUrl(shareUrl);
+        // getDriveApiUrl: uses googleapis.com if API key is set, else /api/proxy
+        const streamUrl = getDriveApiUrl(shareUrl);
         const thumbnailUrl = getDriveThumbnailUrl(shareUrl);
         if (!streamUrl) return;
 
