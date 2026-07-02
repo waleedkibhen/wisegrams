@@ -210,7 +210,7 @@ export default function VideoCard({
         <video
           ref={videoRef}
           className="absolute inset-0 w-full h-full z-10 pointer-events-none"
-          style={{ objectFit: "cover" }}
+          style={{ objectFit: "contain" }}
           loop
           muted
           playsInline
