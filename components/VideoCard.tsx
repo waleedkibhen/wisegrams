@@ -20,11 +20,10 @@ import {
 import type { VideoPost } from "@/lib/storage";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// We strictly limit loaded videos to the current one and the next one.
-// Browsers strictly limit concurrent media connections to the same domain.
-// Loading 3 videos (previous, current, next) exhausts this limit in Chrome,
-// causing subsequent videos (e.g., video 3) to stall in the network queue
-// and permanently appear blank.
+// We keep videos mounted in a sliding window (current +/- 2) to preserve
+// the downloaded buffer and ensure instant scrolling. To prevent exhausting
+// Chrome's concurrent media limits (which causes subsequent videos to stall),
+// we dynamically set preload="none" on distant videos.
 // ─────────────────────────────────────────────────────────────────────────────
 interface VideoCardProps {
   video: VideoPost;
@@ -59,8 +58,11 @@ export default function VideoCard({
 
   const isActive    = index === activeIndex;
   
-  // Strictly load ONLY the active video and the NEXT video.
-  const shouldHaveSrc = index === activeIndex || index === activeIndex + 1;
+  // Keep a sliding window of videos mounted so they don't lose their downloaded buffer.
+  const shouldMount = Math.abs(index - activeIndex) <= 2;
+  
+  // Only aggressively preload the current and immediate next video.
+  const isNearby = index === activeIndex || index === activeIndex + 1;
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -69,13 +71,18 @@ export default function VideoCard({
 
   // ── Effect 1: Auto-play and state reset when video mounts ───────────────
   useEffect(() => {
+    if (isActive && isMountedRef.current) {
+      // If the user scrolls back to this video, clear any lingering network abort errors
+      setHasError(false);
+    }
+
     const el = videoRef.current;
     if (!el) return;
 
     if (pendingPlay.current) {
       el.play().catch(() => {});
     }
-  }, [shouldHaveSrc, isActive]);
+  }, [isActive]);
 
   // ── Effect 2: IntersectionObserver — owns all play/pause decisions ───────
   useEffect(() => {
@@ -228,7 +235,7 @@ export default function VideoCard({
       <div className="absolute inset-0 z-0" onClick={handleTap} />
 
       {/* ── Native <video> — zero iframes, ever ── */}
-      {shouldHaveSrc && (
+      {shouldMount && (
         <video
           ref={videoRef}
           className="absolute inset-0 w-full h-full z-10 pointer-events-none"
@@ -236,7 +243,7 @@ export default function VideoCard({
           loop
           muted
           playsInline
-          preload="auto"
+          preload={isNearby ? "auto" : "none"}
           src={video.streamUrl}
           onCanPlay={onCanPlay}
           onPlay={onPlay}

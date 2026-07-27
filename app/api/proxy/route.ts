@@ -85,12 +85,20 @@ async function resolveStreamUrl(id: string, signal: AbortSignal): Promise<string
         }
       }
 
-      // Pattern 2: find the download form action URL
+      // Pattern 2: find the download form action URL (absolute)
       const formAction = html.match(
         /action="(https:\/\/drive[^"]+export=download[^"]*)"/
       );
       if (formAction) {
         return formAction[1].replace(/&amp;/g, "&");
+      }
+
+      // Pattern 2b: find the download form action URL (relative)
+      const relativeAction = html.match(
+        /action="(\/uc\?export=download[^"]*)"/
+      );
+      if (relativeAction) {
+        return "https://drive.google.com" + relativeAction[1].replace(/&amp;/g, "&");
       }
 
       // Pattern 3: find a full usercontent URL in the page
@@ -100,11 +108,15 @@ async function resolveStreamUrl(id: string, signal: AbortSignal): Promise<string
       if (usercontent) {
         return usercontent[1].replace(/&amp;/g, "&");
       }
-    } catch {
+      
+      console.warn(`[Proxy] Failed to extract download URL from interstitial for ID: ${id}`);
+    } catch (e) {
+      console.error(`[Proxy] Error resolving URL for ID: ${id}`, e);
       continue;
     }
   }
 
+  console.error(`[Proxy] Completely failed to resolve stream URL for ID: ${id}`);
   return null;
 }
 
