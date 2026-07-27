@@ -49,9 +49,9 @@ export function getDriveApiUrl(shareUrl: string): string | null {
   const fileId = extractDriveFileId(shareUrl);
   if (!fileId) return null;
   
-  // For backwards compatibility during transition, if no API key is found,
-  // fallback to the old proxy route.
-  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_DRIVE_API_KEY;
+  // Use the Firebase API Key (which is a Google Cloud API key) to bypass the proxy
+  // and stream directly from Google's CDN to the user's browser.
+  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_DRIVE_API_KEY || "AIzaSyDZxhiKuoaHT-4CtmMGeR6we00hsqwXzJ0";
   if (!apiKey) {
     console.warn("NEXT_PUBLIC_GOOGLE_DRIVE_API_KEY is missing. Falling back to proxy.");
     return `/api/proxy?id=${fileId}`;
