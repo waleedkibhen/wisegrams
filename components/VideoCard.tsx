@@ -16,6 +16,7 @@ import {
   Volume2,
   Music,
   MoreHorizontal,
+  Trash2,
 } from "lucide-react";
 import type { VideoPost } from "@/lib/storage";
 
@@ -30,6 +31,7 @@ interface VideoCardProps {
   index: number;
   activeIndex: number;
   onLike: (id: string) => void;
+  onDelete: (id: string) => void;
 }
 
 export default function VideoCard({
@@ -37,6 +39,7 @@ export default function VideoCard({
   index,
   activeIndex,
   onLike,
+  onDelete,
 }: VideoCardProps) {
   const videoRef   = useRef<HTMLVideoElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);     // outer div — observed by IntersectionObserver
@@ -55,6 +58,7 @@ export default function VideoCard({
   const [showHeart,    setShowHeart]    = useState(false);
   const [playIconState,setPlayIconState]= useState<"play" | "pause" | null>(null);
   const [showMuteToast,setShowMuteToast]= useState(false);
+  const [showMenu,     setShowMenu]     = useState(false);
 
   const isActive    = index === activeIndex;
   
@@ -136,6 +140,7 @@ export default function VideoCard({
 
   const handleTap = useCallback(() => {
     if (!isActive) return;
+    setShowMenu(false); // Close menu on any tap
     const now = Date.now();
 
     if (now - lastTap.current < 280) {
@@ -186,6 +191,12 @@ export default function VideoCard({
       return !m;
     });
   }, []);
+
+  const handleDelete = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    setShowMenu(false);
+    onDelete(video.id);
+  }, [onDelete, video.id]);
 
   const onCanPlay     = useCallback(() => { if (isMountedRef.current) setIsLoaded(true); }, []);
   const onPlay        = useCallback(() => { if (isMountedRef.current) setIsPlaying(true); }, []);
@@ -361,11 +372,33 @@ export default function VideoCard({
         </button>
 
         {/* More */}
-        <button className="flex flex-col items-center" onClick={e => e.stopPropagation()} aria-label="More options">
-          <MoreHorizontal size={26} color="white" strokeWidth={2}
-            style={{ filter: "drop-shadow(0 1px 3px rgba(0,0,0,0.6))" }}
-          />
-        </button>
+        <div className="relative">
+          <button 
+            className="flex flex-col items-center" 
+            onClick={(e) => { e.stopPropagation(); setShowMenu(!showMenu); }} 
+            aria-label="More options"
+          >
+            <MoreHorizontal size={26} color="white" strokeWidth={2}
+              style={{ filter: "drop-shadow(0 1px 3px rgba(0,0,0,0.6))" }}
+            />
+          </button>
+          
+          {/* Dropdown Menu */}
+          {showMenu && (
+            <div 
+              className="absolute right-8 bottom-0 bg-neutral-900/90 backdrop-blur-md rounded-xl p-2 min-w-[120px] shadow-lg border border-white/10 z-50 animate-in fade-in slide-in-from-right-2"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button 
+                onClick={handleDelete}
+                className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-red-500 hover:bg-white/10 transition-colors"
+              >
+                <Trash2 size={16} />
+                <span className="text-sm font-semibold">Delete</span>
+              </button>
+            </div>
+          )}
+        </div>
 
         {/* Spinning disc */}
         <div

@@ -53,7 +53,7 @@ interface VideoFeedProps {
 }
 
 export default function VideoFeed({ onAddVideo }: VideoFeedProps) {
-  const { videos, toggleLike, isInitializing, setShowUploadModal } = useVideoStore();
+  const { videos, toggleLike, removeVideo, isInitializing, setShowUploadModal } = useVideoStore();
   const [activeIndex, setActiveIndex] = useState(0);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -141,6 +141,7 @@ export default function VideoFeed({ onAddVideo }: VideoFeedProps) {
             index={index}
             activeIndex={activeIndex}
             onLike={toggleLike}
+            onDelete={removeVideo}
           />
         </div>
       ))}
