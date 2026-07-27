@@ -73,6 +73,14 @@ export const useVideoStore = create<VideoStore>()(
               }
               return v;
             });
+
+            // Fisher-Yates Shuffle: Randomize the video feed so the user
+            // sees a unique, non-repeating sequence every time they open the app.
+            for (let i = upgradedVideos.length - 1; i > 0; i--) {
+              const j = Math.floor(Math.random() * (i + 1));
+              [upgradedVideos[i], upgradedVideos[j]] = [upgradedVideos[j], upgradedVideos[i]];
+            }
+
             set({ videos: upgradedVideos, isInitializing: false });
           }
         } catch (e) {
