@@ -13,6 +13,8 @@ export interface VideoPost {
   likes: number;
   liked: boolean;
   timestamp: number;
+  originalPlatform?: "instagram" | "tiktok" | "x" | "facebook" | "youtube" | "other" | "web" | "";
+  originalUrl?: string;
 }
 
 export interface UserProfile {

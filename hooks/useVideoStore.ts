@@ -33,7 +33,7 @@ interface VideoStore {
 
   // Actions
   initVideos: () => Promise<void>;
-  addVideo: (shareUrl: string, caption: string) => Promise<void>;
+  addVideo: (shareUrl: string, caption: string, originalPlatform?: VideoPost["originalPlatform"], originalUrl?: string) => Promise<void>;
   toggleLike: (id: string) => Promise<void>;
   removeVideo: (id: string) => Promise<void>;
   updateProfile: (updates: Partial<UserProfile>) => void;
@@ -81,7 +81,7 @@ export const useVideoStore = create<VideoStore>()(
         }
       },
 
-      addVideo: async (shareUrl, caption) => {
+      addVideo: async (shareUrl, caption, originalPlatform, originalUrl) => {
         // getDriveApiUrl: uses googleapis.com if API key is set, else /api/proxy
         const streamUrl = getDriveApiUrl(shareUrl);
         const thumbnailUrl = getDriveThumbnailUrl(shareUrl);
@@ -97,6 +97,8 @@ export const useVideoStore = create<VideoStore>()(
           likes: 0,
           liked: false,
           timestamp: Date.now(),
+          originalPlatform,
+          originalUrl,
         };
 
         // Optimistic UI update

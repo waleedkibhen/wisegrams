@@ -14,6 +14,8 @@ type State = "idle" | "loading" | "error";
 export default function UploadModal({ onClose }: UploadModalProps) {
   const [driveUrl, setDriveUrl] = useState("");
   const [caption, setCaption] = useState("");
+  const [originalPlatform, setOriginalPlatform] = useState<"instagram" | "tiktok" | "x" | "facebook" | "youtube" | "other" | "web" | "">("");
+  const [originalUrl, setOriginalUrl] = useState("");
   const [state, setState] = useState<State>("idle");
   const [errorMsg, setErrorMsg] = useState("");
   const { addVideo } = useVideoStore();
@@ -39,9 +41,9 @@ export default function UploadModal({ onClose }: UploadModalProps) {
     setState("loading");
     setErrorMsg("");
     await new Promise(r => setTimeout(r, 400));
-    addVideo(trimmed, caption.trim() || "✨");
+    addVideo(trimmed, caption.trim() || "✨", originalPlatform, originalUrl.trim());
     onClose();
-  }, [driveUrl, caption, addVideo, onClose]);
+  }, [driveUrl, caption, originalPlatform, originalUrl, addVideo, onClose]);
 
   const handlePaste = useCallback(async () => {
     try {
@@ -207,6 +209,56 @@ export default function UploadModal({ onClose }: UploadModalProps) {
                   </span>
                 </div>
               </div>
+            </div>
+
+            {/* Original Platform (Optional) */}
+            <div className="flex flex-col gap-3">
+              <label className="text-[13px] font-semibold uppercase tracking-widest" style={{ color: "#8E8E93" }}>
+                Original Source (Optional)
+              </label>
+              
+              <select
+                value={originalPlatform}
+                onChange={(e) => setOriginalPlatform(e.target.value as any)}
+                className="w-full text-white text-[16px] outline-none appearance-none rounded-xl"
+                style={{
+                  background: "#2c2c2e",
+                  padding: "14px 16px",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                }}
+              >
+                <option value="">Select Platform</option>
+                <option value="instagram">Instagram</option>
+                <option value="tiktok">TikTok</option>
+                <option value="x">X (Twitter)</option>
+                <option value="facebook">Facebook</option>
+                <option value="youtube">YouTube</option>
+                <option value="web">Web</option>
+                <option value="other">Other</option>
+              </select>
+
+              {originalPlatform && (
+                <div
+                  className="flex items-center gap-3 rounded-xl mt-1"
+                  style={{
+                    background: "#2c2c2e",
+                    padding: "14px 16px",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                  }}
+                >
+                  <Link2 size={18} style={{ color: "#8E8E93", flexShrink: 0 }} />
+                  <input
+                    type="url"
+                    value={originalUrl}
+                    onChange={e => setOriginalUrl(e.target.value)}
+                    placeholder={`Paste original ${originalPlatform} link...`}
+                    className="flex-1 bg-transparent text-white text-[16px] outline-none placeholder:text-[#636366] min-w-0"
+                    autoComplete="off"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                  />
+                </div>
+              )}
             </div>
 
             {/* Error */}

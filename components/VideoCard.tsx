@@ -197,6 +197,28 @@ export default function VideoCard({
 
   const initials = (video.author ?? "W")[0].toUpperCase();
 
+  const getPlatformLabel = (platform?: string) => {
+    switch (platform) {
+      case "instagram": return "Instagram";
+      case "tiktok": return "TikTok";
+      case "x": return "X";
+      case "facebook": return "Facebook";
+      case "youtube": return "YouTube";
+      default: return "Original Source";
+    }
+  };
+
+  const getPlatformColor = (platform?: string) => {
+    switch (platform) {
+      case "instagram": return "linear-gradient(45deg, #f09433 0%, #e6683c 25%, #dc2743 50%, #cc2366 75%, #bc1888 100%)";
+      case "tiktok": return "#25F4EE";
+      case "x": return "#000000";
+      case "facebook": return "#1877F2";
+      case "youtube": return "#FF0000";
+      default: return "rgba(255,255,255,0.2)";
+    }
+  };
+
   return (
     <div
       ref={wrapperRef}
@@ -395,6 +417,28 @@ export default function VideoCard({
             </span>
           </div>
         </div>
+
+        {video.originalUrl && (
+          <a
+            href={video.originalUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-center gap-1.5 px-3 py-1.5 mt-1 rounded-full pointer-events-auto active:opacity-70 transition-opacity w-fit"
+            style={{ 
+              background: video.originalPlatform === "instagram" ? undefined : getPlatformColor(video.originalPlatform),
+              backgroundImage: video.originalPlatform === "instagram" ? getPlatformColor(video.originalPlatform) : undefined,
+              border: video.originalPlatform === "tiktok" || video.originalPlatform === "x" ? "1px solid rgba(255,255,255,0.2)" : "none",
+            }}
+            onClick={(e) => e.stopPropagation()} // Prevent video pause when clicking the link
+          >
+            <span className="text-[12px] font-bold" style={{
+              color: video.originalPlatform === "tiktok" ? "black" : "white",
+              textShadow: video.originalPlatform === "tiktok" ? "none" : "0 1px 2px rgba(0,0,0,0.5)"
+            }}>
+              Watch on {getPlatformLabel(video.originalPlatform)}
+            </span>
+          </a>
+        )}
       </div>
     </div>
   );
