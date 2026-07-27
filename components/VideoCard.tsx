@@ -254,13 +254,13 @@ export default function VideoCard({
         />
       )}
 
-      {/* Gradient scrim — keeps text readable against any video */}
+      {/* Gradient scrim — extremely light, just barely enough for text readability */}
       <div
         className="absolute inset-0 pointer-events-none"
         style={{
           zIndex: 15,
           background:
-            "linear-gradient(to top, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.2) 35%, rgba(0,0,0,0) 60%)",
+            "linear-gradient(to top, rgba(0,0,0,0.2) 0%, rgba(0,0,0,0.05) 15%, rgba(0,0,0,0) 30%)",
         }}
       />
 
