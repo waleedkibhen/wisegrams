@@ -207,7 +207,23 @@ export default function VideoCard({
       setIsLoaded(true); // Backup in case onCanPlay missed it
     }
   }, []);
-  const onError       = useCallback(() => { if (isMountedRef.current) setHasError(true); }, []);
+  const onError       = useCallback(() => { 
+    if (isMountedRef.current) setHasError(true); 
+    
+    // Advanced Debug Logging: Ping the URL to see EXACTLY why it failed
+    fetch(video.streamUrl)
+      .then(async (res) => {
+        if (!res.ok) {
+          const text = await res.text();
+          console.error(`[Video Error] ID: ${video.id} | Status: ${res.status} | Response:`, text);
+        } else {
+          console.error(`[Video Error] ID: ${video.id} | Status: ${res.status} OK (Browser might be blocking the media format or cross-site tracking)`);
+        }
+      })
+      .catch((err) => {
+        console.error(`[Video Error] ID: ${video.id} | Network Fetch Failed:`, err);
+      });
+  }, [video.streamUrl, video.id]);
   const onTimeUpdate  = useCallback((e: React.SyntheticEvent<HTMLVideoElement>) => {
     const el = e.currentTarget;
     if (el.duration && isMountedRef.current) setProgress(el.currentTime / el.duration);
